@@ -1,0 +1,30 @@
+import type { PixelSample } from '../core/sampling';
+
+export const WIDTH = 720;
+export const HEIGHT = 405;
+
+export function context2d(canvas: HTMLCanvasElement, options?: CanvasRenderingContext2DSettings): CanvasRenderingContext2D {
+  const context = canvas.getContext('2d', options);
+  if (!context) {
+    throw new Error('This browser could not start a Canvas 2D context.');
+  }
+  return context;
+}
+
+export class ThumbnailReader {
+  private readonly context: CanvasRenderingContext2D;
+
+  constructor() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 96;
+    canvas.height = 54;
+    this.context = context2d(canvas, { alpha: false, willReadFrequently: true });
+  }
+
+  read(source: HTMLCanvasElement): PixelSample {
+    const { context } = this;
+    const { width, height } = context.canvas;
+    context.drawImage(source, 0, 0, width, height);
+    return context.getImageData(0, 0, width, height).data;
+  }
+}
