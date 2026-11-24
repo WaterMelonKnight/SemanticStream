@@ -86,29 +86,31 @@
         <section class="panel metrics" aria-labelledby="metrics-title">
           <h2 id="metrics-title">Live metrics</h2>
           <p>Cumulative results for this session.</p>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">Mode</th>
-                <th scope="col">Input</th>
-                <th scope="col">Sent</th>
-                <th scope="col">Filtered</th>
-                <th scope="col">Avg. latency</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr id="metrics-adaptive" data-active="true">
-                <th scope="row">Adaptive</th>
-                <td id="adaptive-inputs">0</td><td id="adaptive-sent">0</td>
-                <td id="adaptive-filtered">—</td><td id="adaptive-latency">—</td>
-              </tr>
-              <tr id="metrics-fixed" data-active="false">
-                <th scope="row">Fixed</th>
-                <td id="fixed-inputs">0</td><td id="fixed-sent">0</td>
-                <td id="fixed-filtered">—</td><td id="fixed-latency">—</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="metrics-table" role="region" aria-label="Sampling metrics table" tabindex="0">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Mode</th>
+                  <th scope="col">Input</th>
+                  <th scope="col">Sent</th>
+                  <th scope="col">Filtered</th>
+                  <th scope="col">Avg. latency</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr id="metrics-adaptive" data-active="true">
+                  <th scope="row">Adaptive</th>
+                  <td id="adaptive-inputs">0</td><td id="adaptive-sent">0</td>
+                  <td id="adaptive-filtered">—</td><td id="adaptive-latency">—</td>
+                </tr>
+                <tr id="metrics-fixed" data-active="false">
+                  <th scope="row">Fixed</th>
+                  <td id="fixed-inputs">0</td><td id="fixed-sent">0</td>
+                  <td id="fixed-filtered">—</td><td id="fixed-latency">—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <p class="metric-note">Latency includes thumbnail preparation, sampling, and any agent copy. Brief visual events can be missed.</p>
         </section>
       </div>

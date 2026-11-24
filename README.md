@@ -35,3 +35,7 @@ Fixed mode targets 4 fps. Adaptive mode uses mean RGB change against its latest 
 The dashboard reports processed input frames, actual frame deliveries, the filtered share, and mean browser processing latency. Brief or small visual events can be missed by capture, sampling, or the budget. Raw-frame retrieval remains planned. The frame metrics do not measure model tokens.
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) for contracts and timing, [ROADMAP.md](ROADMAP.md) for follow-up work, and [AGENTS.md](AGENTS.md) for coding-agent handoff.
+
+## License
+
+Apache License 2.0 is proposed for SemanticStream, pending repository owner confirmation. The repository currently has no project license file.

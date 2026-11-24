@@ -23,7 +23,7 @@ body {
 
 button, input { font: inherit; }
 button, input[type="range"] { cursor: pointer; }
-button:focus-visible, input:focus-visible {
+button:focus-visible, input:focus-visible, .metrics-table:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 4px;
 }
@@ -265,9 +265,13 @@ legend, .slider label { padding: 0; color: var(--subtle); font-size: 12px; font-
 
 .metrics > p { margin: 6px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
 
+.metrics-table {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
 .metrics table {
   width: 100%;
-  margin-top: 12px;
   border-collapse: separate;
   border-spacing: 0 4px;
   text-align: right;
