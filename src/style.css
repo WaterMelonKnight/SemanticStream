@@ -309,5 +309,5 @@ legend, .slider label { padding: 0; color: var(--subtle); font-size: 12px; font-
   .wordmark { font-size: 15px; gap: 7px; }
   .local-status { font-size: 11px; gap: 5px; }
   .settings, .metrics { padding-inline: 10px; }
-  .metrics th, .metrics td { padding-inline: 5px; }
+  .metrics th, .metrics td { padding-inline: 3px; }
 }

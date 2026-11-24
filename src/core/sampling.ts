@@ -39,9 +39,18 @@ export class FixedSamplingPolicy implements SamplingPolicy<unknown> {
   }
 
   wantsFrame({ timestampMs, firstTimestampMs, lastDelivery }: SamplingContext<unknown>): boolean {
-    const currentSlot = Math.floor((timestampMs - firstTimestampMs) / this.intervalMs);
-    const deliveredSlot = Math.floor((lastDelivery.timestampMs - firstTimestampMs) / this.intervalMs);
-    return currentSlot > deliveredSlot;
+    const deliveredAt = lastDelivery.timestampMs;
+    const slot = Math.floor((deliveredAt - firstTimestampMs) / this.intervalMs);
+    const slotStart = firstTimestampMs + slot * this.intervalMs;
+    let nextSlotStart = firstTimestampMs + (slot + 1) * this.intervalMs;
+
+    // Fractional timestamps can round across a slot boundary during subtraction.
+    if (deliveredAt < slotStart) {
+      nextSlotStart = slotStart;
+    } else if (deliveredAt >= nextSlotStart) {
+      nextSlotStart = firstTimestampMs + (slot + 2) * this.intervalMs;
+    }
+    return timestampMs >= nextSlotStart;
   }
 }
 

@@ -14,7 +14,7 @@ export class BudgetController {
   }
 
   canSend(timestampMs: number): boolean {
-    while (this.deliveries.length && this.deliveries[0] <= timestampMs - this.windowMs) {
+    while (this.deliveries.length && timestampMs >= this.deliveries[0] + this.windowMs) {
       this.deliveries.shift();
     }
     return this.deliveries.length < this.frameLimit;

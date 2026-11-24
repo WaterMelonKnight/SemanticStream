@@ -25,6 +25,22 @@ describe('stream sampler', () => {
     ]);
   });
 
+  it('counts a delivery at a fractional fixed-slot boundary only in the new slot', () => {
+    const sampler = new Sampler(new FixedSamplingPolicy(250), new BudgetController(5_000, 20), timing, acceptingSink);
+    const timestamps = [6.4, 256.399, 256.4, 400, 506.4];
+
+    expect(timestamps.map((time) => sampler.process(frame(time), 'log message'))).toEqual([
+      'sent', 'policy', 'sent', 'policy', 'sent',
+    ]);
+  });
+
+  it('keeps a delivery immediately before a fractional fixed-slot boundary in the earlier slot', () => {
+    const sampler = new Sampler(new FixedSamplingPolicy(250), new BudgetController(5_000, 20), timing, acceptingSink);
+    const timestamps = [128.2, 878.1999999999999, 1_004];
+
+    expect(timestamps.map((time) => sampler.process(frame(time), 'log message'))).toEqual(['sent', 'sent', 'sent']);
+  });
+
   it('accumulates adaptive changes against the last delivery and applies threshold changes', () => {
     const policy = new AdaptiveSamplingPolicy(3);
     const sampler = new Sampler(policy, new BudgetController(5_000, 20), timing, acceptingSink);
@@ -44,6 +60,17 @@ describe('stream sampler', () => {
     expect(sampler.process(frame(1_500), pixels)).toBe('sent');
     expect(sampler.process(frame(2_999), pixels)).toBe('policy');
     expect(sampler.process(frame(3_000), pixels)).toBe('sent');
+  });
+
+  it('uses fractional delivery deadlines for minimum spacing and silence refreshes', () => {
+    const sampler = new Sampler(new AdaptiveSamplingPolicy(1.5), new BudgetController(5_000, 20), timing, acceptingSink);
+
+    expect(sampler.process(frame(3.2), gray(0))).toBe('sent');
+    expect(sampler.process(frame(128.199), gray(30))).toBe('interval');
+    expect(sampler.process(frame(128.2), gray(30))).toBe('sent');
+    expect(sampler.process(frame(548.2), gray(60))).toBe('sent');
+    expect(sampler.process(frame(2_048.199), gray(60))).toBe('policy');
+    expect(sampler.process(frame(2_048.2), gray(60))).toBe('sent');
   });
 
   it('enforces minimum spacing and the budget even for overdue silence refreshes', () => {

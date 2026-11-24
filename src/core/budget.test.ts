@@ -15,6 +15,15 @@ describe('rolling frame budget', () => {
     expect(budget.canSend(5_400)).toBe(true);
   });
 
+  it('expires a fractional timestamp at its exact deadline', () => {
+    const budget = new BudgetController(5_000, 1);
+    expect(budget.canSend(100.2)).toBe(true);
+    budget.recordDelivery(100.2);
+
+    expect(budget.canSend(5_100.199)).toBe(false);
+    expect(budget.canSend(5_100.2)).toBe(true);
+  });
+
   it('keeps recent deliveries when lowering or raising the cap', () => {
     const budget = new BudgetController(5_000, 3);
     for (const timestamp of [0, 500, 1_000]) {

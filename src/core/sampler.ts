@@ -53,12 +53,11 @@ export class Sampler<T, Sample> {
     const { timestampMs } = frame;
     const lastDelivery = this.lastDelivery;
     if (lastDelivery) {
-      const silenceMs = timestampMs - lastDelivery.timestampMs;
-      if (silenceMs < this.timing.maximumSilenceMs
+      if (timestampMs < lastDelivery.timestampMs + this.timing.maximumSilenceMs
         && !this.policy.wantsFrame({ timestampMs, firstTimestampMs, sample, lastDelivery })) {
         return 'policy';
       }
-      if (silenceMs < this.timing.minimumIntervalMs) {
+      if (timestampMs < lastDelivery.timestampMs + this.timing.minimumIntervalMs) {
         return 'interval';
       }
     }

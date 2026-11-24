@@ -26,7 +26,7 @@ npm run build
 npm run preview
 ```
 
-GitHub Actions runs the install, typecheck, tests, and static build for branch pushes and pull requests. For Cloudflare Pages, use the Vite preset or set the build command to `npm run build`, the build output directory to `dist`, and `NODE_VERSION` to `24`. The application uses static files and requires no Cloudflare bindings.
+GitHub Actions runs the install, typecheck, tests, and static build for branch pushes and pull requests. For Cloudflare Pages, use the repository root, `npm run build` as the build command, and `dist` as the build output directory. Set `NODE_VERSION` to `24` for preview and production builds, including when using a Vite preset. The application uses static files and requires no Cloudflare bindings.
 
 ## Read the results
 
