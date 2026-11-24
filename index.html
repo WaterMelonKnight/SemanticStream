@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A local visual streaming demo that compares fixed and adaptive sampling on the same live feed." />
+    <meta name="theme-color" content="#10101a" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <title>SemanticStream — Visual stream demo</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="container topbar-inner">
+        <div class="wordmark"><span class="wordmark-icon" aria-hidden="true"></span>SemanticStream</div>
+        <p class="local-status" id="stream-status" role="status"><span aria-hidden="true"></span>Browser local</p>
+      </div>
+    </header>
+
+    <main class="container">
+      <div class="intro">
+        <h1>Less data. <span>More understanding.</span></h1>
+        <p>Compare fixed and adaptive sampling on the same live visual stream.</p>
+      </div>
+      <noscript>Enable JavaScript to run the visual stream.</noscript>
+
+      <section class="stream" aria-labelledby="stream-title">
+        <div class="section-heading">
+          <h2 id="stream-title">Live stream</h2>
+          <button id="restart" class="restart" type="button"><span aria-hidden="true">↻</span> Restart demo</button>
+        </div>
+        <div class="views">
+          <article class="panel view">
+            <header class="view-header">
+              <h3><i class="view-dot" aria-hidden="true"></i>Original feed</h3>
+              <span id="source-phase" class="phase">Waiting</span>
+            </header>
+            <canvas id="source-canvas" width="720" height="405" role="img" aria-label="Original procedural visual feed"></canvas>
+            <footer class="view-footer">
+              <span id="source-sequence">No frame yet</span>
+              <span id="source-time">—</span>
+            </footer>
+          </article>
+          <article class="panel view agent-view">
+            <header class="view-header">
+              <h3><i class="view-dot" aria-hidden="true"></i>Mock agent</h3>
+              <span id="agent-mode" class="phase">Adaptive</span>
+            </header>
+            <canvas id="agent-adaptive" width="720" height="405" role="img" aria-label="Most recent frame accepted by the adaptive mock agent"></canvas>
+            <canvas id="agent-fixed" width="720" height="405" role="img" aria-label="Most recent frame accepted by the fixed mock agent" hidden></canvas>
+            <footer class="view-footer">
+              <span id="agent-sequence">No frame yet</span>
+              <span id="agent-phase">—</span>
+              <span id="agent-time">—</span>
+            </footer>
+          </article>
+        </div>
+      </section>
+
+      <div class="dashboard">
+        <section class="panel settings" aria-labelledby="settings-title">
+          <h2 id="settings-title">Sampling controls</h2>
+          <fieldset>
+            <legend>Agent view</legend>
+            <div class="segmented">
+              <label><input type="radio" name="mode" id="mode-adaptive" value="adaptive" checked /><span>Adaptive</span></label>
+              <label><input type="radio" name="mode" id="mode-fixed" value="fixed" /><span>Fixed · 4 fps</span></label>
+            </div>
+          </fieldset>
+          <div class="slider">
+            <div class="slider-heading">
+              <label for="threshold">Adaptive change threshold</label>
+              <output id="threshold-value" for="threshold">1.5%</output>
+            </div>
+            <input id="threshold" type="range" min="0.5" max="10" step="0.1" value="1.5" />
+          </div>
+          <div class="slider">
+            <div class="slider-heading">
+              <label for="budget">Rolling frame budget</label>
+              <output id="budget-value" for="budget">20 frames / 5 s</output>
+            </div>
+            <input id="budget" type="range" min="1" max="40" step="1" value="20" />
+          </div>
+        </section>
+
+        <section class="panel metrics" aria-labelledby="metrics-title">
+          <h2 id="metrics-title">Live metrics</h2>
+          <p>Cumulative results for this session.</p>
+          <div class="metrics-table" role="region" aria-label="Sampling metrics table" tabindex="0">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Mode</th>
+                  <th scope="col">Input</th>
+                  <th scope="col">Sent</th>
+                  <th scope="col">Filtered</th>
+                  <th scope="col">Avg. latency</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr id="metrics-adaptive" data-active="true">
+                  <th scope="row">Adaptive</th>
+                  <td id="adaptive-inputs">0</td><td id="adaptive-sent">0</td>
+                  <td id="adaptive-filtered">—</td><td id="adaptive-latency">—</td>
+                </tr>
+                <tr id="metrics-fixed" data-active="false">
+                  <th scope="row">Fixed</th>
+                  <td id="fixed-inputs">0</td><td id="fixed-sent">0</td>
+                  <td id="fixed-filtered">—</td><td id="fixed-latency">—</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="metric-note">Latency includes thumbnail preparation, sampling, and any agent copy. Brief visual events can be missed.</p>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>
