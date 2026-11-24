@@ -5,10 +5,17 @@ import type { ScenePhase } from './scene';
 
 const CAPTURE_INTERVAL_MS = 1_000 / 30;
 
+export type VisualPhase = ScenePhase | 'Video';
+
 export interface VisualFrame {
   readonly canvas: HTMLCanvasElement;
+  /** Position inside the source: scene time for the demo, media time for video. */
   readonly elapsedMs: number;
-  readonly phase: ScenePhase;
+  /** Video media time, or null when the source is procedural. */
+  readonly mediaTimeMs: number | null;
+  /** Monotonic time since this capture session started. */
+  readonly sessionElapsedMs: number;
+  readonly phase: VisualPhase;
 }
 
 export class ProceduralSource implements StreamSource<VisualFrame> {
@@ -41,7 +48,13 @@ export class ProceduralSource implements StreamSource<VisualFrame> {
         listener({
           sequence: ++this.sequence,
           timestampMs: performance.now(),
-          payload: { canvas: this.canvas, elapsedMs, phase },
+          payload: {
+            canvas: this.canvas,
+            elapsedMs,
+            mediaTimeMs: null,
+            sessionElapsedMs: elapsedMs,
+            phase,
+          },
         });
       } catch (error) {
         this.stop();
