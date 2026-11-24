@@ -1,0 +1,97 @@
+# ========== 环境变量与密钥 ==========
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
+
+# ========== Python ==========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+pip-wheel-metadata/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 虚拟环境
+venv/
+.venv/
+env/
+ENV/
+
+# 测试与覆盖率
+.pytest_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+
+# 静态检查 / 类型检查缓存
+.mypy_cache/
+.ruff_cache/
+.pyright/
+.dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# ========== Node.js ==========
+node_modules/
+.npm/
+.yarn/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ========== 通用构建产物与依赖 ==========
+out/
+target/
+bin/
+obj/
+coverage/
+
+# ========== IDE / 编辑器 ==========
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.code-workspace
+*~
+
+# ========== 操作系统文件 ==========
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ========== 日志与临时文件 ==========
+logs/
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+.cache/
+cache/
+tmp/
+temp/
+
+# ========== 其他 ==========
+*.local
