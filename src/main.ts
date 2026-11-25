@@ -11,6 +11,12 @@ import type { MetricsSnapshot } from './core/metrics';
 import type { StreamFrame } from './core/stream';
 import type { BenchmarkReport } from './benchmark/types';
 import type { Phase2Report } from './benchmark/retrieval-types';
+import type { TaskReport } from './benchmark/task-types';
+import { DecisionEngine } from './decision/engine';
+import { DecisionFeatureExtractor } from './decision/features';
+import { RuleBasedDecisionProvider } from './decision/rule-provider';
+import type { DecisionState, RecentDecision, TaskDefinition } from './decision/types';
+import type { PixelSample } from './core/sampling';
 import { formatBytes, formatClock, formatRate } from './ui/format';
 import { drawDecisionTimeline, timelineEntryIndexAt } from './ui/timeline-view';
 import type { FrameMetadata } from './visual/mock-agent';
@@ -24,12 +30,29 @@ const REFRESH_INTERVAL_MS = 500;
 const LIVE_BUFFER_MAX_AGE_MS = 3_000;
 const LIVE_BUFFER_MAX_FRAMES = 90;
 const LIVE_BUFFER_MAX_BYTES = 3_000_000;
+const LIVE_REALTIME_MAX_BYTES = 1_000_000;
 const LIVE_RETRIEVAL_MAX_FRAMES = 6;
 const LIVE_RETRIEVAL_MAX_BYTES = 2_000_000;
 const LIVE_TOTAL_MAX_FRAMES = 26;
 const LIVE_TOTAL_MAX_BYTES = 4_000_000;
 const REGION_WIDTH = 24;
 const REGION_HEIGHT = 16;
+const LIVE_DECISION_INTERVAL_MS = 100;
+
+const TASK_PRESETS: Readonly<Record<string, TaskDefinition>> = {
+  'read-status': {
+    id: 'read-status', label: 'Read status text', category: 'text-reading', priority: 'high',
+    roi: { x: 40, y: 20, width: 24, height: 14 },
+  },
+  'monitor-motion': {
+    id: 'monitor-motion', label: 'Monitor motion', category: 'motion-monitoring', priority: 'normal',
+    roi: { x: 8, y: 10, width: 80, height: 36 },
+  },
+  'inspect-panel': {
+    id: 'inspect-panel', label: 'Inspect panel', category: 'general-inspection', priority: 'normal',
+    roi: { x: 24, y: 18, width: 48, height: 24 },
+  },
+};
 
 type SourceKind = 'demo' | 'video';
 
@@ -154,6 +177,20 @@ function runDemo(): void {
   const phase2BenchmarkStatus = element('phase2-benchmark-status');
   const phase2BenchmarkBody = element<HTMLTableSectionElement>('phase2-benchmark-body');
   const phase2BenchmarkNote = element('phase2-benchmark-note');
+  const taskSelect = element<HTMLSelectElement>('task-select');
+  const roiX = element<HTMLInputElement>('roi-x');
+  const roiY = element<HTMLInputElement>('roi-y');
+  const roiW = element<HTMLInputElement>('roi-w');
+  const roiH = element<HTMLInputElement>('roi-h');
+  const taskStatus = element('task-status');
+  const taskRoiSummary = element('task-roi-summary');
+  const taskRealtimeBudget = element('task-realtime-budget');
+  const taskRetrievalBudget = element('task-retrieval-budget');
+  const taskDecisionLatency = element('task-decision-latency');
+  const taskDecisionLog = element<HTMLTableSectionElement>('task-decision-log');
+  const phase3BenchmarkStatus = element('phase3-benchmark-status');
+  const phase3BenchmarkBody = element<HTMLTableSectionElement>('phase3-benchmark-body');
+  const phase3BenchmarkNote = element('phase3-benchmark-note');
 
   videoElement.muted = true;
   videoElement.playsInline = true;
@@ -170,14 +207,40 @@ function runDemo(): void {
   let sessionCounter = 0;
   let lastRetrievedFrame: BufferedFrame | null = null;
   let lastRenderedRequestCount = -1;
+  const taskGate = { allowed: false };
+  let liveTask: TaskDefinition = { ...TASK_PRESETS['read-status'], roi: { ...TASK_PRESETS['read-status'].roi! } };
+  let liveBaseline: PixelSample | null = null;
+  let liveRecentDecisions: RecentDecision[] = [];
+  let liveRepeatedChangeCount = 0;
+  let liveRepeatedRoiChangeCount = 0;
+  let liveBudgetDeniedCount = 0;
+  let liveLastDecisionAt = -Infinity;
+  let liveDecisionPending = false;
+  let liveDecisionLatency: number | null = null;
+  const liveDecisionProvider = new RuleBasedDecisionProvider();
+  const liveDecisionEngine = new DecisionEngine(liveDecisionProvider, liveDecisionProvider, { timeoutMs: 50 });
+  const liveFeatureExtractor = new DecisionFeatureExtractor({
+    sampleWidth: SAMPLE_WIDTH,
+    sampleHeight: SAMPLE_HEIGHT,
+    blockWidth: Number(blockSize.value),
+    blockHeight: Number(blockSize.value),
+    blockThreshold: localThreshold.valueAsNumber,
+    minChangedBlocks: 4,
+  });
 
   function currentAdaptiveStrategy(): AdaptiveStrategy {
     const value = adaptiveStrategySelect.value;
-    return value === 'local' || value === 'hybrid' ? value : 'global';
+    return value === 'local' || value === 'hybrid' || value === 'task' ? value : 'global';
   }
 
   function adaptiveStrategyLabel(strategy: AdaptiveStrategy): string {
-    return strategy === 'global' ? 'Global' : strategy === 'local' ? 'Local' : 'Hybrid';
+    return strategy === 'global' ? 'Global'
+      : strategy === 'local' ? 'Local'
+        : strategy === 'hybrid' ? 'Hybrid' : 'Task-aware';
+  }
+
+  function taskAwareMode(): boolean {
+    return currentAdaptiveStrategy() === 'task';
   }
 
   function createSession(): SamplingSession {
@@ -188,6 +251,9 @@ function runDemo(): void {
       localThreshold: localThreshold.valueAsNumber,
       blockWidth: Number(blockSize.value),
       blockHeight: Number(blockSize.value),
+      admission: retrievalService.admission,
+      deliveryBytes: SAMPLE_WIDTH * SAMPLE_HEIGHT * 4,
+      taskGate: () => taskGate.allowed,
     });
   }
 
@@ -201,6 +267,11 @@ function runDemo(): void {
     });
     const service = new ActiveRetrievalService(buffer, {
       sessionId,
+      realtime: {
+        windowMs: 5_000,
+        maxFrames: budget.valueAsNumber,
+        maxBytes: LIVE_REALTIME_MAX_BYTES,
+      },
       retrieval: {
         windowMs: 5_000,
         maxFrames: LIVE_RETRIEVAL_MAX_FRAMES,
@@ -216,10 +287,10 @@ function runDemo(): void {
     return { buffer, service };
   }
 
-  let session = createSession();
   const initialLive = createLiveRetrieval();
   let liveBuffer = initialLive.buffer;
   let retrievalService = initialLive.service;
+  let session = createSession();
 
   function presentSentDelta(snapshot: SessionSnapshot): void {
     const { adaptive, fixed } = snapshot;
@@ -282,6 +353,181 @@ function runDemo(): void {
     setRetrievalStatus(message, 'idle');
   }
 
+  function clampTaskRoi(): void {
+    let x = Math.max(0, Math.min(SAMPLE_WIDTH - 1, Math.round(roiX.valueAsNumber) || 0));
+    let y = Math.max(0, Math.min(SAMPLE_HEIGHT - 1, Math.round(roiY.valueAsNumber) || 0));
+    let width = Math.max(1, Math.min(SAMPLE_WIDTH - x, Math.round(roiW.valueAsNumber) || 1));
+    let height = Math.max(1, Math.min(SAMPLE_HEIGHT - y, Math.round(roiH.valueAsNumber) || 1));
+    x = Math.max(0, x);
+    y = Math.max(0, y);
+    width = Math.max(1, Math.min(SAMPLE_WIDTH - x, width));
+    height = Math.max(1, Math.min(SAMPLE_HEIGHT - y, height));
+    roiX.value = String(x);
+    roiY.value = String(y);
+    roiW.value = String(width);
+    roiH.value = String(height);
+    liveTask = {
+      ...liveTask,
+      id: 'custom',
+      label: 'Custom ROI',
+      category: 'general-inspection',
+      priority: 'normal',
+      roi: { x, y, width, height },
+    };
+    taskSelect.value = 'custom';
+    taskRoiSummary.textContent = `${liveTask.label} · ${x},${y} ${width}×${height}`;
+    resetTaskPreview();
+  }
+
+  function selectTaskPreset(id: string): void {
+    if (id === 'custom') {
+      taskRoiSummary.textContent = `${liveTask.label} · ${roiX.value},${roiY.value} ${roiW.value}×${roiH.value}`;
+      return;
+    }
+    const preset = TASK_PRESETS[id];
+    if (!preset) return;
+    liveTask = { ...preset, roi: preset.roi ? { ...preset.roi } : null };
+    if (liveTask.roi) {
+      roiX.value = String(liveTask.roi.x);
+      roiY.value = String(liveTask.roi.y);
+      roiW.value = String(liveTask.roi.width);
+      roiH.value = String(liveTask.roi.height);
+      taskRoiSummary.textContent = `${liveTask.label} · ${liveTask.roi.x},${liveTask.roi.y} ${liveTask.roi.width}×${liveTask.roi.height}`;
+    }
+    resetTaskPreview();
+  }
+
+  function resetTaskPreview(): void {
+    liveBaseline = null;
+    liveRecentDecisions = [];
+    liveRepeatedChangeCount = 0;
+    liveRepeatedRoiChangeCount = 0;
+    liveBudgetDeniedCount = 0;
+    liveLastDecisionAt = -Infinity;
+    liveDecisionPending = false;
+    liveDecisionLatency = null;
+    taskGate.allowed = false;
+    taskDecisionLatency.textContent = '—';
+    taskStatus.textContent = taskAwareMode() ? 'Live gate · waiting' : 'Advisory preview';
+    taskStatus.dataset.state = 'idle';
+    taskDecisionLog.replaceChildren();
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 6;
+    cell.textContent = 'Waiting for input frames.';
+    row.append(cell);
+    taskDecisionLog.append(row);
+  }
+
+  function presentTaskBudget(): void {
+    const stats = retrievalService.stats();
+    const realtimeRemaining = Math.max(0, stats.budget.realtime.maxFrames - stats.budget.realtime.usedFrames);
+    const retrievalRemaining = Math.max(0, stats.budget.retrieval.maxFrames - stats.budget.retrieval.usedFrames);
+    taskRealtimeBudget.textContent = `${realtimeRemaining}/${stats.budget.realtime.maxFrames} frames`;
+    taskRetrievalBudget.textContent = `${retrievalRemaining}/${stats.budget.retrieval.maxFrames} frames`;
+    taskDecisionLatency.textContent = liveDecisionLatency === null ? '—' : liveDecisionLatency.toFixed(3) + ' ms';
+  }
+
+  function presentTaskDecision(decision: { action: string; reason: string; degraded: boolean; latencyMs: number; providerId: string }): void {
+    liveDecisionLatency = decision.latencyMs;
+    taskStatus.textContent = decision.degraded
+      ? 'Fallback used'
+      : (taskAwareMode() ? 'Live gate · ' : 'Advisory preview · ') + decision.providerId;
+    taskStatus.dataset.state = decision.degraded ? 'error' : 'ok';
+    const row = document.createElement('tr');
+    row.dataset.degraded = String(decision.degraded);
+    const cells = [
+      new Date().toLocaleTimeString(),
+      decision.action,
+      'heuristic',
+      decision.latencyMs.toFixed(3) + ' ms',
+      decision.degraded ? 'yes' : 'no',
+      decision.reason,
+    ];
+    for (const value of cells) {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      row.append(cell);
+    }
+    taskDecisionLog.prepend(row);
+    while (taskDecisionLog.children.length > 8) taskDecisionLog.lastElementChild?.remove();
+  }
+
+  function updateLiveDecision(timestampMs: number, sample: PixelSample, decisions: { adaptive: string }): void {
+    const baseline = liveBaseline ?? sample;
+    const features = liveFeatureExtractor.analyze(baseline, sample, liveTask.roi);
+    if (features.localPercent >= localThreshold.valueAsNumber) liveRepeatedChangeCount += 1;
+    else liveRepeatedChangeCount = 0;
+    if (features.roiPercent !== null && features.roiPercent >= localThreshold.valueAsNumber) liveRepeatedRoiChangeCount += 1;
+    else liveRepeatedRoiChangeCount = 0;
+    if (decisions.adaptive === 'budget') liveBudgetDeniedCount += 1;
+    if (decisions.adaptive === 'sent') liveBaseline = sample;
+
+    if (liveDecisionPending || timestampMs - liveLastDecisionAt < LIVE_DECISION_INTERVAL_MS) return;
+    liveLastDecisionAt = timestampMs;
+    liveDecisionPending = true;
+    const taskAtDecision = liveTask;
+    const snapshot = retrievalService.admission.snapshot(timestampMs);
+    const cache = liveBuffer.stats();
+    const state: DecisionState = {
+      sessionId: liveBuffer.sessionId,
+      timestampMs,
+      task: taskAtDecision,
+      change: {
+        globalPercent: features.globalPercent,
+        localPercent: features.localPercent,
+        changedBlocks: features.changedBlocks,
+        totalBlocks: features.totalBlocks,
+      },
+      roi: taskAtDecision.roi === null || features.roiPercent === null
+        ? null
+        : { region: taskAtDecision.roi, changePercent: features.roiPercent },
+      recent: {
+        repeatedChangeCount: liveRepeatedChangeCount,
+        repeatedRoiChangeCount: liveRepeatedRoiChangeCount,
+        budgetDeniedCount: liveBudgetDeniedCount,
+        recentDecisions: [...liveRecentDecisions],
+      },
+      budget: {
+        realtimeRemainingFrames: Math.max(0, snapshot.realtime.maxFrames - snapshot.realtime.usedFrames),
+        realtimeRemainingBytes: Math.max(0, snapshot.realtime.maxBytes - snapshot.realtime.usedBytes),
+        retrievalRemainingFrames: Math.max(0, snapshot.retrieval.maxFrames - snapshot.retrieval.usedFrames),
+        retrievalRemainingBytes: Math.max(0, snapshot.retrieval.maxBytes - snapshot.retrieval.usedBytes),
+        totalRemainingFrames: Math.max(0, snapshot.total.maxFrames - snapshot.total.usedFrames),
+        totalRemainingBytes: Math.max(0, snapshot.total.maxBytes - snapshot.total.usedBytes),
+      },
+      cache: {
+        availableRange: cache.oldestTimestampMs === null
+          ? null
+          : { startMs: cache.oldestTimestampMs, endMs: cache.latestTimestampMs ?? cache.oldestTimestampMs },
+        capturedRange: cache.firstCapturedTimestampMs === null
+          ? null
+          : { startMs: cache.firstCapturedTimestampMs, endMs: cache.lastCapturedTimestampMs ?? cache.firstCapturedTimestampMs },
+        frameCount: cache.frameCount,
+        byteCount: cache.byteCount,
+      },
+    };
+    const startedAt = performance.now();
+    void liveDecisionEngine.decide(state).then((decision) => {
+      liveDecisionPending = false;
+      if (liveTask.id !== taskAtDecision.id) return;
+      liveDecisionLatency = performance.now() - startedAt;
+      liveRecentDecisions.push({ timestampMs, action: decision.action, reason: decision.reason });
+      if (liveRecentDecisions.length > 20) liveRecentDecisions.shift();
+      taskGate.allowed = decision.action === 'SEND_FRAME' || decision.action === 'SEND_PREVIEW';
+      presentTaskDecision({
+        action: decision.action,
+        reason: decision.reason,
+        degraded: decision.degraded,
+        latencyMs: liveDecisionLatency,
+        providerId: decision.providerId,
+      });
+      presentTaskBudget();
+    }).catch(() => {
+      liveDecisionPending = false;
+    });
+  }
+
   function presentRetrieval(): void {
     const bufferStats = liveBuffer.stats();
     const retrievalStats = retrievalService.stats();
@@ -293,6 +539,7 @@ function runDemo(): void {
     retrievalBudget.textContent = `${retrievalStats.budget.retrieval.usedFrames}/${retrievalStats.budget.retrieval.maxFrames} ret · `
       + `${retrievalStats.budget.total.usedFrames}/${retrievalStats.budget.total.maxFrames} total`;
     renderRetrievalLog(retrievalStats);
+    presentTaskBudget();
   }
 
   function renderRetrievalLog(stats: RetrievalStats): void {
@@ -420,9 +667,11 @@ function runDemo(): void {
     const live = createLiveRetrieval();
     liveBuffer = live.buffer;
     retrievalService = live.service;
+    retrievalService.setRealtimeFrameLimit(budget.valueAsNumber);
     retrievalService.setTotalFrameLimit(budget.valueAsNumber + LIVE_RETRIEVAL_MAX_FRAMES);
     session = createSession();
     lastDisplayAt = -Infinity;
+    resetTaskPreview();
     clearRetrievalView();
     updateAgentView();
     presentSnapshot(session);
@@ -548,6 +797,7 @@ function runDemo(): void {
 
   function onFrame(frame: StreamFrame<VisualFrame>): void {
     const { decisions, sample } = session.process(frame);
+    updateLiveDecision(frame.timestampMs, sample, decisions);
     const { payload } = frame;
     liveBuffer.offer({
       sequence: frame.sequence,
@@ -571,8 +821,8 @@ function runDemo(): void {
     sourceTimestamp.textContent = 't+' + (frame.timestampMs / 1_000).toFixed(2) + ' s';
     if (decisions[mode] === 'sent') {
       presentAgentFrame();
-      retrievalService.recordRealtimeSend(frame.timestampMs, sample.byteLength);
     }
+    if (decisions.adaptive === 'sent') taskGate.allowed = false;
 
     if (frame.timestampMs - lastDisplayAt >= DISPLAY_INTERVAL_MS) {
       lastDisplayAt = frame.timestampMs;
@@ -588,6 +838,7 @@ function runDemo(): void {
 
   function applyBudget(): void {
     session.setBudget(budget.valueAsNumber);
+    retrievalService.setRealtimeFrameLimit(budget.valueAsNumber);
     retrievalService.setTotalFrameLimit(budget.valueAsNumber + LIVE_RETRIEVAL_MAX_FRAMES);
     const frames = budget.value + (budget.valueAsNumber === 1 ? ' frame' : ' frames');
     budgetValue.value = frames + ' / 5 s';
@@ -607,9 +858,14 @@ function runDemo(): void {
 
   function syncStrategyControls(): void {
     const strategy = currentAdaptiveStrategy();
-    threshold.disabled = strategy === 'local';
-    localThreshold.disabled = strategy === 'global';
-    blockSize.disabled = strategy === 'global';
+    threshold.disabled = strategy === 'local' || strategy === 'task';
+    localThreshold.disabled = strategy === 'global' || strategy === 'task';
+    blockSize.disabled = strategy === 'global' || strategy === 'task';
+    if (!taskAwareMode()) taskGate.allowed = false;
+    if (taskStatus.dataset.state !== 'error') {
+      taskStatus.textContent = taskAwareMode() ? 'Live gate · waiting' : 'Advisory preview';
+      taskStatus.dataset.state = 'idle';
+    }
   }
 
   for (const radio of [adaptiveRadio, fixedRadio]) {
@@ -624,6 +880,7 @@ function runDemo(): void {
   localThreshold.addEventListener('input', applyLocalThreshold);
   blockSize.addEventListener('change', applyBlockSize);
   adaptiveStrategySelect.addEventListener('change', () => {
+    taskGate.allowed = false;
     session.setAdaptiveStrategy(currentAdaptiveStrategy());
     syncStrategyControls();
     updateAgentView();
@@ -815,11 +1072,70 @@ function runDemo(): void {
     }
   }
 
+  function renderPhase3Benchmark(report: TaskReport): void {
+    const evaluation = report.suites.evaluation;
+    phase3BenchmarkBody.replaceChildren();
+    for (const aggregate of evaluation.aggregates) {
+      const row = document.createElement('tr');
+      const labels = ['Strategy', 'Realtime', 'Post-retrieval', 'ROI realtime', 'ROI post', 'Retrieval', 'Total sent', 'Cache peak', 'Violations', 'Decision / fallback'];
+      const values = [
+        aggregate.strategyLabel,
+        `${(100 * aggregate.realtimeRecall).toFixed(1)}% (${aggregate.realtimeCapturedEvents}/${aggregate.observableEvents})`,
+        `${(100 * aggregate.postRetrievalRecall).toFixed(1)}% (${aggregate.postCapturedEvents}/${aggregate.observableEvents})`,
+        `${(100 * aggregate.roiRealtimeRecall).toFixed(1)}% (${aggregate.roiRealtimeCapturedEvents}/${aggregate.roiObservableEvents})`,
+        `${(100 * aggregate.roiPostRetrievalRecall).toFixed(1)}% (${aggregate.roiPostCapturedEvents}/${aggregate.roiObservableEvents})`,
+        `${aggregate.retrievalFrames} · ${formatBytes(aggregate.retrievalBytes)}`,
+        `${aggregate.totalSent} · ${formatBytes(aggregate.totalBytes)}`,
+        `${formatBytes(aggregate.peakCacheBytes)} / ${aggregate.peakCacheFrames} frames`,
+        `${aggregate.realtimeBudgetViolations}/${aggregate.retrievalBudgetViolations}/${aggregate.totalBudgetViolations}`,
+        aggregate.decisionLatencyMeanMs === null
+          ? '—'
+          : `${aggregate.decisionLatencyMeanMs.toFixed(3)} ms · ${aggregate.decisionFallbacks} fallback`,
+      ];
+      values.forEach((value, index) => {
+        const cell = index === 0 ? document.createElement('th') : document.createElement('td');
+        if (index === 0 && cell instanceof HTMLTableCellElement) cell.scope = 'row';
+        cell.dataset.label = labels[index];
+        cell.textContent = value;
+        row.append(cell);
+      });
+      phase3BenchmarkBody.append(row);
+    }
+    phase3BenchmarkStatus.textContent = `${evaluation.scenes.length} held-out scenes · task ROI predeclared`;
+    phase3BenchmarkNote.textContent = 'Task ROI is authored per scene and is not generated from evaluator labels. D uses heuristic rule scores, not calibrated probabilities. '
+      + 'The result is a comparison, not a promise that the task-aware policy wins.';
+  }
+
+  async function loadPhase3Benchmark(): Promise<void> {
+    try {
+      const response = await fetch(import.meta.env.BASE_URL + 'benchmark/phase3.json', { cache: 'no-cache' });
+      if (!response.ok) throw new Error(`Phase 3 benchmark request returned ${response.status}.`);
+      renderPhase3Benchmark(await response.json() as TaskReport);
+    } catch (error) {
+      phase3BenchmarkStatus.textContent = 'Unavailable';
+      phase3BenchmarkBody.replaceChildren();
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 10;
+      cell.textContent = 'Phase 3A benchmark results are not available. Run npm run benchmark.';
+      row.append(cell);
+      phase3BenchmarkBody.append(row);
+      phase3BenchmarkNote.textContent = 'The live decision preview still works; benchmark data is a generated static artifact.';
+      console.error('Could not load Phase 3A benchmark results.', error);
+    }
+  }
+
+  taskSelect.addEventListener('change', () => selectTaskPreset(taskSelect.value));
+  for (const input of [roiX, roiY, roiW, roiH]) {
+    input.addEventListener('change', clampTaskRoi);
+  }
+
   applyThreshold();
   applyBudget();
   applyLocalThreshold();
   applyBlockSize();
   syncStrategyControls();
+  selectTaskPreset('read-status');
   updateAgentView();
   setSourceModeUi();
   presentSnapshot(session);
@@ -832,6 +1148,7 @@ function runDemo(): void {
 
   void loadBenchmark();
   void loadPhase2Benchmark();
+  void loadPhase3Benchmark();
 }
 
 try {

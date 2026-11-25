@@ -32,8 +32,18 @@
 - Extend the deterministic replay benchmark to compare fixed, adaptive local, adaptive local + cue retrieval, and a clearly labeled label-timed oracle upper bound.
 - Measure real-time and post-retrieval recall, retrieval frames/bytes/latency, cache peak, evictions, total sends, and budget violations; focus on the Phase 1B background-motion miss.
 
+## Phase 3A · Task-Aware Decision Engine
+
+- Add a read-only `DecisionState` containing task/category/priority, user-declared ROI, global/local/ROI change, repeated-change statistics, remaining budgets, cache ranges, and bounded recent decisions.
+- Add a pluggable `DecisionProvider` with a finite action space, priority, candidate scores, timeout, and deterministic fallback.
+- Ship a `RuleBasedDecisionProvider` whose scores are explicitly heuristic, not calibrated probabilities; add a design-only HTTP adapter contract.
+- Add unified ex-ante admission so adaptive real-time sends and retrieval both fit independent sub-budgets and the combined total; cover dynamic limits, rolling boundaries, and duplicate accounting with regression tests.
+- Benchmark fixed, local, local + retrieval, and task-aware Rule Decision under the same total budget, with predeclared task ROI, deterministic random task scenes, repeated/overlapping events, and failure reporting.
+- Add task selection, ROI editing, live decision records, an optional live send gate, remaining budgets, and Phase 3A evaluation results to the page.
+- Document how Laya, AnyJev, Jev API, generic structured-output models, and local classifiers could plug into the provider boundary without changing budgets or safety checks.
+
 ## Next
 
-- Add opt-in visual sources beyond local files, with explicit permission handling.
-- Evaluate asynchronous sinks, tighter resource budgets, and bounded delivery under backpressure.
-- Validate the abstractions against a concrete log, audio, or sensor source before generalizing them.
+- Implement one real local model adapter behind `DecisionProvider` and calibrate its probabilities before ranking them against heuristic scores.
+- Add an opt-in asynchronous sink and a bounded backpressure policy.
+- Validate task ROI and decision latency on a real screen or camera source with explicit permission handling.

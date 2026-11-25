@@ -858,3 +858,41 @@ button:disabled {
   background: #2b243b;
   color: #e5d8ff;
 }
+
+.task-panel { display: grid; gap: 12px; }
+
+.task-controls {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.4fr) repeat(4, minmax(70px, 0.6fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.task-controls label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.task-controls input,
+.task-controls select { width: 100%; }
+
+.task-controls input {
+  padding: 6px 7px;
+  border: 1px solid #3a3550;
+  border-radius: 6px;
+  background: #171622;
+  color: var(--text);
+  font: 11px var(--mono);
+}
+
+.task-decision-table { min-width: 680px; }
+.task-decision-table td:last-child { white-space: normal; text-align: left; }
+.task-decision-table tbody tr[data-degraded="true"] { color: #ffc6ce; }
+
+@media (max-width: 680px) {
+  .task-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .task-decision-table { min-width: 620px; }
+}

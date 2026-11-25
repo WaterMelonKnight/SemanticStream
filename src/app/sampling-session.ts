@@ -3,6 +3,7 @@ import type { FrameDecision, MetricsSnapshot } from '../core/metrics';
 import { RollingRate } from '../core/rate';
 import { AdaptiveStrategyPolicy } from '../core/local-change';
 import type { AdaptiveStrategy } from '../core/local-change';
+import type { DeliveryAdmission } from '../core/resource-admission';
 import { FixedSamplingPolicy } from '../core/sampling';
 import type { PixelSample, SamplingPolicy } from '../core/sampling';
 import { Sampler } from '../core/sampler';
@@ -35,6 +36,9 @@ export interface SessionSettings {
   readonly localThreshold: number;
   readonly blockWidth: number;
   readonly blockHeight: number;
+  readonly admission?: DeliveryAdmission;
+  readonly deliveryBytes?: number;
+  readonly taskGate?: () => boolean;
 }
 
 export interface SessionRates {
@@ -85,6 +89,7 @@ export class SamplingSession {
     this.adaptivePolicy = new AdaptiveStrategyPolicy({
       strategy: settings.adaptiveStrategy,
       globalThreshold: settings.threshold,
+      taskGate: settings.taskGate,
       local: {
         sampleWidth: SAMPLE_WIDTH,
         sampleHeight: SAMPLE_HEIGHT,
@@ -98,7 +103,15 @@ export class SamplingSession {
     this.fixedBudget = new BudgetController(BUDGET_WINDOW_MS, settings.budget);
     const fixedPolicy: SamplingPolicy<PixelSample> = new FixedSamplingPolicy(250);
     this.samplers = {
-      adaptive: new Sampler(this.adaptivePolicy, this.adaptiveBudget, DELIVERY_TIMING, this.agents.adaptive),
+      adaptive: new Sampler(
+        this.adaptivePolicy,
+        this.adaptiveBudget,
+        DELIVERY_TIMING,
+        this.agents.adaptive,
+        undefined,
+        settings.admission,
+        settings.deliveryBytes ?? SAMPLE_WIDTH * SAMPLE_HEIGHT * 4,
+      ),
       fixed: new Sampler(fixedPolicy, this.fixedBudget, DELIVERY_TIMING, this.agents.fixed),
     };
   }

@@ -2,7 +2,7 @@
 
 **Less data. More understanding.**
 
-SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 adds a bounded history buffer and active retrieval, so an agent can ask for visual evidence that was not sent in real time.
+SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 added a bounded history buffer and active retrieval. Phase 3A adds a task-aware, pluggable decision boundary while keeping the same local-only runtime.
 
 Everything runs locally in the browser or in Node.js. The selected video is read through a local Object URL and drawn to Canvas; no video or frame is uploaded. The project requires no GPU, backend, database, model API, or paid service.
 
@@ -21,7 +21,7 @@ The live demo compares a fixed sampler with a configurable adaptive sampler:
 - **Local blocks** — a configurable block-local detector.
 - **Hybrid** — global change OR local blocked change.
 
-Both branches use 125 ms minimum delivery spacing, a 1.5 s silence refresh, and the configured rolling five-second frame cap. The selected agent's real-time deliveries are also recorded in a combined resource ledger.
+Both branches use 125 ms minimum delivery spacing, a 1.5 s silence refresh, and the configured rolling five-second frame cap. The adaptive branch is the agent under test: its real-time deliveries go through the shared ex-ante admission gate and are recorded with the retrieval ledger. The fixed branch is the side-by-side comparison baseline.
 
 ## Bounded context buffer
 
@@ -54,7 +54,7 @@ Retrieval has its own rolling budget and shares a combined ledger with real-time
 - Combined real-time + retrieval: **26 frames and 4 MB / 5 s**.
 - Real-time sampler: the existing **20 frames / 5 s** cap.
 
-The live UI records the selected agent's real-time deliveries. A retrieval request is rejected before data leaves the buffer when either the retrieval budget or the combined budget is exhausted. The benchmark independently audits all three limits.
+Real-time adaptive sends and retrieval both pass a single ex-ante `ResourceAdmissionController`. It checks the relevant independent sub-budget and the combined total before the sink or buffer returns data. A denied send does not charge the sampler budget; a denied retrieval does not charge the retrieval budget. The benchmark independently audits all three limits.
 
 ## Live retrieval demo
 
@@ -68,11 +68,26 @@ The page adds:
 
 This is a mock agent. It does not call a model or MCP service.
 
+## Task-aware decisions
+
+Phase 3A adds a task-aware decision layer above the sampler:
+
+- A typed `DecisionState` with task category, declared ROI, global/local/ROI change, repeated-change counters, remaining real-time/retrieval/total budget, cache range, and recent decisions.
+- A finite action space: `SEND_FRAME`, `SEND_PREVIEW`, `DROP`, `WAIT`, `REQUEST_HISTORY`, `REQUEST_REGION`, `ESCALATE`.
+- A pluggable `DecisionProvider` with mandatory score provenance. `RuleBasedDecisionProvider` returns heuristic weights; it does not pretend they are calibrated probabilities.
+- A timeout and deterministic fallback path. Invalid actions are rejected before any effect.
+- A 100 ms decision interval so expensive model calls are never made on every frame. The shared sampler still owns budget, spacing, and silence refresh.
+- No provider can mutate resource budgets or bypass admission.
+
+The live page lets you choose a task, edit a custom ROI, inspect the decision log, and see remaining budget. The same provider is advisory by default; selecting **Task-aware (live gate)** makes its `SEND_FRAME`/`SEND_PREVIEW` decision gate the adaptive sampler's next send. Retrieval actions are executed by the Phase 3A benchmark, not by the live preview. The shared sampler still applies its budget, interval, and silence refresh.
+
+See [docs/decision-model-integration.md](docs/decision-model-integration.md) for the Laya, AnyJev, Jev API, generic structured-output, and local-classifier adapter design, calibration requirements, latency budgets, degradation, and safety boundaries. Phase 3A ships no model, GPU work, paid API, or network provider.
+
 ## Deterministic benchmark
 
-`npm run benchmark` runs both the Phase 1B event benchmark and the Phase 2 retrieval benchmark. The retrieval benchmark reuses the same deterministic 30 fps, 96 × 54 replay fixtures and the same real-time sampler.
+`npm run benchmark` runs the Phase 1B event benchmark, the Phase 2 retrieval benchmark, and the Phase 3A task-aware benchmark. All three reuse the same deterministic 30 fps, 96 × 54 replay fixtures where applicable.
 
-It compares:
+Phase 2 compares:
 
 - **A · Fixed 4 fps**
 - **B · Adaptive local**
@@ -83,7 +98,7 @@ C's only cue is a real system signal: the real-time sampler returned `budget`. I
 
 The oracle requests a frame at the midpoint of each labeled event. It exists only to estimate the best case under label-perfect triggering. It also bypasses the production retrieval budget because it is not a deployable strategy. **It is not autonomous discovery.**
 
-### Held-out evaluation
+### Phase 2 held-out evaluation
 
 9 observable events out of 10; one event is inside a capture gap.
 
@@ -100,9 +115,23 @@ Results are written to:
 
 - `benchmarks/results/latest.json`, `latest.csv`, `latest.md` — Phase 1B.
 - `benchmarks/results/phase2.json`, `phase2.csv`, `phase2.md` — Phase 2.
-- `public/benchmark/latest.json` and `public/benchmark/phase2.json` — used by the page.
+- `benchmarks/results/phase3.json`, `phase3.csv`, `phase3.md` — Phase 3A.
+- `public/benchmark/latest.json`, `public/benchmark/phase2.json`, and `public/benchmark/phase3.json` — used by the page.
 
-Recall means a delivered or retrieved frame timestamp falls inside a labeled event window. It does not measure whether a model understood the event. Uncaptured events cannot be recovered. The buffer is short-lived; frames evicted before a request are returned as `evicted`.
+### Phase 3A held-out evaluation
+
+Phase 3A adds 9 held-out scenes: the original 6 plus deterministic task-ROI, repeated-event, and overlapping-event scenes. It compares A, B, C, and **D · Task-aware Rule Decision** under the same total frames/bytes budget, cache bounds, and time constraints. Task ROI is authored per scene; evaluator event regions are not used to create the ROI at decision time.
+
+| Strategy | Realtime recall | Post-retrieval recall | ROI realtime recall | ROI post-retrieval | Retrieval frames | Total sent | Cache peak | Violations (rt / ret / total) | Decision latency |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| A · Fixed 4 fps | 94.4% (17/18) | 94.4% (17/18) | 94.1% (16/17) | 94.1% (16/17) | 0 | 211 | 1.87 MB / 90 | 0 / 0 / 0 | — |
+| B · Adaptive local | 88.9% (16/18) | 88.9% (16/18) | 88.2% (15/17) | 88.2% (15/17) | 0 | 113 | 1.87 MB / 90 | 0 / 0 / 0 | — |
+| C · Local + retrieval | 88.9% (16/18) | 100.0% (18/18) | 88.2% (15/17) | 100.0% (17/17) | 16 | 129 | 1.87 MB / 90 | 0 / 0 / 0 | — |
+| D · Task-aware Rule Decision | 72.2% (13/18) | 94.4% (17/18) | 76.5% (13/17) | 94.1% (16/17) | 22 | 99 | 1.87 MB / 90 | 0 / 0 / 0 | 0.037 ms |
+
+D sends fewer total frames than B or C and improves its own real-time recall after retrieval, but it is not uniformly better: C reaches 100% overall and ROI recall on this held-out suite, while D misses some events. The benchmark reports the loss rather than hiding it. The decision score is a heuristic weight, not a calibrated model probability.
+
+Recall means a delivered or retrieved frame timestamp falls inside a labeled event window. It does not measure whether a model understood the event. Uncaptured events cannot be recovered. The buffer is short-lived; frames evicted before a request are returned as `evicted`. Task ROI recall is a separate metric over events whose annotated region intersects the authored task ROI.
 
 ## Verify and build
 
@@ -118,23 +147,25 @@ Tests cover:
 
 - Buffer time/byte/frame limits, ownership copies, eviction reasons, lookup statuses, ranges, regions, disposal, and cross-session isolation.
 - Retrieval budget, combined budget, denial, request logs, regions, wrong-session, and disposal.
+- Unified ex-ante admission: sub-budget vs total, dynamic limits, rolling-window boundary, duplicate-accounting prevention, and sampler denial.
 - Phase 2 cue replay, cache bounds, background-motion recovery, event-label isolation for cue decisions, deterministic digests, and report generation.
+- Decision features, rule scoring, heuristic-vs-probability labeling, timeout/fallback, invalid-action rejection, low-frequency scheduling, task-aware replay, task ROI metrics, and Phase 3A report generation.
 - Existing sampler, video lifecycle, Phase 1B fixtures/benchmark, timeline, rate, and formatting tests.
 
-GitHub Actions runs install, typecheck, all tests, both benchmarks, and the static build. For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. No Cloudflare bindings are required.
+GitHub Actions runs install, typecheck, all tests, all three benchmarks, and the static build. For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. No Cloudflare bindings are required.
 
 ### Browser checklist
 
-The built page was exercised in headless Chromium with a 390 px viewport: timeline click retrieval, region crop, eviction error, retrieval budget denial, both benchmark panels, and no horizontal overflow. CI does not install a browser. Before a release, also check on real devices:
+The built page was exercised in headless Chromium with a 390 px viewport: timeline click retrieval, region crop, eviction error, retrieval budget denial, task selection/ROI editing, live decision log and gate, all benchmark panels, and no horizontal overflow. CI does not install a browser. Before a release, also check on real devices:
 
 1. iPhone Safari: select a camera-roll MP4, play/pause/seek, click a recent timeline column, and crop a region.
 2. Android Chrome: switch video files while playing, then retrieve a frame from the new session; confirm the old session is rejected as `wrong-session`.
 3. Background/restore the tab and confirm capture and the bounded buffer resume without a burst.
-4. Rotate a narrow phone and check the timeline, retrieval panel, log, and benchmark cards.
+4. Rotate a narrow phone and check the timeline, retrieval panel, task panel, decision log, and benchmark cards.
 
 ## Documentation
 
-Read [ARCHITECTURE.md](ARCHITECTURE.md) for contracts, bounded buffer semantics, budgets, retrieval statuses, benchmark isolation, and ownership; [ROADMAP.md](ROADMAP.md) for phase status; and [AGENTS.md](AGENTS.md) for coding-agent handoff.
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for contracts, bounded buffer semantics, budgets, retrieval statuses, decision boundaries, benchmark isolation, and ownership; [docs/decision-model-integration.md](docs/decision-model-integration.md) for future model adapters; [ROADMAP.md](ROADMAP.md) for phase status; and [AGENTS.md](AGENTS.md) for coding-agent handoff.
 
 ## License
 

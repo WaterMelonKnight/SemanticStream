@@ -23,7 +23,7 @@ const GLYPHS: Readonly<Record<string, readonly string[]>> = {
   '!': ['010', '010', '010', '000', '010'],
 };
 
-function createBaseSample(): Uint8ClampedArray {
+export function createBaseSample(): Uint8ClampedArray {
   const sample = new Uint8ClampedArray(SAMPLE_WIDTH * SAMPLE_HEIGHT * 4);
   for (let y = 0; y < SAMPLE_HEIGHT; y += 1) {
     for (let x = 0; x < SAMPLE_WIDTH; x += 1) {
@@ -57,7 +57,7 @@ function addToPixel(sample: Uint8ClampedArray, x: number, y: number, delta: numb
   sample[index + 2] = Math.min(255, Math.max(0, sample[index + 2] + delta));
 }
 
-function drawText(
+export function drawText(
   sample: Uint8ClampedArray,
   region: BlockRegion,
   text: string,
@@ -78,7 +78,7 @@ function drawText(
   }
 }
 
-function shadeRegion(sample: Uint8ClampedArray, region: BlockRegion, delta: number): void {
+export function shadeRegion(sample: Uint8ClampedArray, region: BlockRegion, delta: number): void {
   for (let y = region.y; y < region.y + region.height; y += 1) {
     for (let x = region.x; x < region.x + region.width; x += 1) {
       addToPixel(sample, x, y, delta);
@@ -99,7 +99,7 @@ function paintTextEvents(
   };
 }
 
-function buildScene(spec: {
+export function buildScene(spec: {
   readonly id: string;
   readonly suite: SceneSuite;
   readonly description: string;

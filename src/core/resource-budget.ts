@@ -84,6 +84,6 @@ export class RollingResourceBudget {
 
   private prune(timestampMs: number): void {
     const cutoff = timestampMs - this.limits.windowMs;
-    while (this.entries.length && this.entries[0].timestampMs < cutoff) this.entries.shift();
+    while (this.entries.length && this.entries[0].timestampMs <= cutoff) this.entries.shift();
   }
 }
