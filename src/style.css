@@ -597,3 +597,135 @@ button:disabled {
   .video-buttons { display: grid; grid-template-columns: 1fr 1fr; }
   .capture-badge { grid-column: 1 / -1; }
 }
+
+/* ========== Phase 1B: local stategy controls and benchmark results ========== */
+
+.select-control {
+  display: block;
+  width: 100%;
+  min-height: 38px;
+  margin-top: 4px;
+  padding: 7px 9px;
+  border: 1px solid #3d3550;
+  border-radius: 7px;
+  background: #12111c;
+  color: #eee6ff;
+  font: 12px var(--sans, Inter, system-ui, sans-serif);
+}
+
+.select-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.select-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.benchmark-panel {
+  margin-top: 16px;
+  padding: 17px 18px;
+}
+
+.benchmark-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+
+.benchmark-heading p {
+  margin: 5px 0 0;
+  max-width: 70ch;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.benchmark-status {
+  color: var(--subtle);
+  font: 11px var(--mono);
+  white-space: nowrap;
+}
+
+.benchmark-table {
+  width: 100%;
+  min-width: 660px;
+  border-collapse: separate;
+  border-spacing: 0 4px;
+  text-align: right;
+  font-size: 12px;
+}
+
+.benchmark-table th,
+.benchmark-table td { padding: 8px; }
+.benchmark-table th:first-child { text-align: left; }
+.benchmark-table thead th { color: var(--muted); font-size: 11px; font-weight: 650; }
+.benchmark-table tbody th { font-weight: 650; }
+.benchmark-table td { font-family: var(--mono); white-space: nowrap; }
+.benchmark-table tbody tr { background: #221f30; }
+.benchmark-table tbody tr[data-strategy="hybrid"] { background: #2d243e; }
+.benchmark-table tbody :is(th, td):first-child { border-radius: 6px 0 0 6px; }
+.benchmark-table tbody :is(th, td):last-child { border-radius: 0 6px 6px 0; }
+
+.benchmark-panel code {
+  color: #ded2ff;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+@media (max-width: 680px) {
+  .benchmark-panel { padding: 14px; }
+  .benchmark-status { white-space: normal; }
+}
+
+
+@media (max-width: 680px) {
+  .benchmark-table {
+    min-width: 0;
+    border-spacing: 0;
+  }
+
+  .benchmark-table thead { display: none; }
+
+  .benchmark-table tbody,
+  .benchmark-table tr,
+  .benchmark-table th,
+  .benchmark-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .benchmark-table tbody tr {
+    margin-bottom: 8px;
+    padding: 9px 11px;
+    border-radius: 8px;
+  }
+
+  .benchmark-table tbody th {
+    padding: 0 0 5px;
+    border-bottom: 1px solid #3a334b;
+    color: #f2eaff;
+    font-size: 13px;
+  }
+
+  .benchmark-table tbody th::before { content: none; }
+
+  .benchmark-table tbody td {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 3px 0;
+    text-align: right;
+  }
+
+  .benchmark-table tbody td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-family: Inter, system-ui, sans-serif;
+    font-weight: 500;
+    text-align: left;
+  }
+}

@@ -1,8 +1,10 @@
 import './style.css';
 import { SamplingSession, TIMELINE_CAPACITY } from './app/sampling-session';
 import type { SamplingMode, SessionSnapshot } from './app/sampling-session';
+import type { AdaptiveStrategy } from './core/local-change';
 import type { MetricsSnapshot } from './core/metrics';
 import type { StreamFrame } from './core/stream';
+import type { BenchmarkReport } from './benchmark/types';
 import { formatClock, formatRate } from './ui/format';
 import { drawDecisionTimeline } from './ui/timeline-view';
 import type { FrameMetadata } from './visual/mock-agent';
@@ -91,6 +93,10 @@ function runDemo(): void {
   const thresholdValue = element<HTMLOutputElement>('threshold-value');
   const budget = element<HTMLInputElement>('budget');
   const budgetValue = element<HTMLOutputElement>('budget-value');
+  const adaptiveStrategySelect = element<HTMLSelectElement>('adaptive-strategy');
+  const localThreshold = element<HTMLInputElement>('local-threshold');
+  const localThresholdValue = element<HTMLOutputElement>('local-threshold-value');
+  const blockSize = element<HTMLSelectElement>('block-size');
   const sourcePhase = element('source-phase');
   const sourceSequence = element('source-sequence');
   const sourceTime = element('source-time');
@@ -116,6 +122,10 @@ function runDemo(): void {
   const timelineCanvas = element<HTMLCanvasElement>('timeline-canvas');
   const timelineCount = element('timeline-count');
   const sentDelta = element('sent-delta');
+  const benchmarkStatus = element('benchmark-status');
+  const benchmarkBody = element<HTMLTableSectionElement>('benchmark-body');
+  const benchmarkNote = element('benchmark-note');
+  const benchmarkFailureNote = element('benchmark-failures');
 
   videoElement.muted = true;
   videoElement.playsInline = true;
@@ -130,10 +140,23 @@ function runDemo(): void {
   let videoWasPlaying = false;
   let refreshTimer: number | undefined;
 
+  function currentAdaptiveStrategy(): AdaptiveStrategy {
+    const value = adaptiveStrategySelect.value;
+    return value === 'local' || value === 'hybrid' ? value : 'global';
+  }
+
+  function adaptiveStrategyLabel(strategy: AdaptiveStrategy): string {
+    return strategy === 'global' ? 'Global' : strategy === 'local' ? 'Local' : 'Hybrid';
+  }
+
   function createSession(): SamplingSession {
     return new SamplingSession(adaptiveCanvas, fixedCanvas, {
       threshold: threshold.valueAsNumber,
       budget: budget.valueAsNumber,
+      adaptiveStrategy: currentAdaptiveStrategy(),
+      localThreshold: localThreshold.valueAsNumber,
+      blockWidth: Number(blockSize.value),
+      blockHeight: Number(blockSize.value),
     });
   }
 
@@ -176,7 +199,7 @@ function runDemo(): void {
     const adaptive = mode === 'adaptive';
     adaptiveCanvas.hidden = !adaptive;
     fixedCanvas.hidden = adaptive;
-    agentMode.textContent = adaptive ? 'Adaptive' : 'Fixed';
+    agentMode.textContent = adaptive ? 'Adaptive · ' + adaptiveStrategyLabel(currentAdaptiveStrategy()) : 'Fixed';
     metrics.adaptive.row.dataset.active = String(adaptive);
     metrics.fixed.row.dataset.active = String(!adaptive);
     presentAgentFrame();
@@ -342,6 +365,24 @@ function runDemo(): void {
     budget.setAttribute('aria-valuetext', frames + ' per 5 seconds');
   }
 
+  function applyLocalThreshold(): void {
+    session.setLocalThreshold(localThreshold.valueAsNumber);
+    localThresholdValue.value = localThreshold.valueAsNumber.toFixed(1) + '%';
+    localThreshold.setAttribute('aria-valuetext', localThresholdValue.value);
+  }
+
+  function applyBlockSize(): void {
+    const size = Number(blockSize.value);
+    session.setBlockSize(size, size);
+  }
+
+  function syncStrategyControls(): void {
+    const strategy = currentAdaptiveStrategy();
+    threshold.disabled = strategy === 'local';
+    localThreshold.disabled = strategy === 'global';
+    blockSize.disabled = strategy === 'global';
+  }
+
   for (const radio of [adaptiveRadio, fixedRadio]) {
     radio.addEventListener('change', () => {
       mode = fixedRadio.checked ? 'fixed' : 'adaptive';
@@ -351,6 +392,13 @@ function runDemo(): void {
 
   threshold.addEventListener('input', applyThreshold);
   budget.addEventListener('input', applyBudget);
+  localThreshold.addEventListener('input', applyLocalThreshold);
+  blockSize.addEventListener('change', applyBlockSize);
+  adaptiveStrategySelect.addEventListener('change', () => {
+    session.setAdaptiveStrategy(currentAdaptiveStrategy());
+    syncStrategyControls();
+    updateAgentView();
+  });
   restartButton.addEventListener('click', restartCurrent);
   useDemo.addEventListener('click', returnToDemo);
 
@@ -414,8 +462,77 @@ function runDemo(): void {
     }
   });
 
+  function renderBenchmark(report: BenchmarkReport): void {
+    const evaluation = report.suites.evaluation;
+    const byStrategy = new Map(evaluation.aggregates.map((aggregate) => [aggregate.strategy, aggregate]));
+    benchmarkBody.replaceChildren();
+    for (const strategy of report.configuration.strategies) {
+      const aggregate = byStrategy.get(strategy.id);
+      if (!aggregate) continue;
+      const row = document.createElement('tr');
+      row.dataset.strategy = strategy.id;
+      const labels = ['Strategy', 'Sent', 'Recall', 'Missed', 'First capture', 'Mean processing', 'Budget violations'];
+      const values = [
+        strategy.label,
+        aggregate.sent.toLocaleString('en'),
+        `${(100 * aggregate.recall).toFixed(1)}% (${aggregate.capturedEvents}/${aggregate.observableEvents})`,
+        aggregate.missedEvents.toLocaleString('en'),
+        aggregate.meanFirstCaptureLatencyMs === null ? '—' : aggregate.meanFirstCaptureLatencyMs.toFixed(1) + ' ms',
+        aggregate.meanProcessingMs.toFixed(3) + ' ms',
+        aggregate.budgetViolations.toLocaleString('en'),
+      ];
+      values.forEach((value, index) => {
+        const cell = index === 0 ? document.createElement('th') : document.createElement('td');
+        if (index === 0 && cell instanceof HTMLTableCellElement) cell.scope = 'row';
+        cell.dataset.label = labels[index];
+        cell.textContent = value;
+        row.append(cell);
+      });
+      benchmarkBody.append(row);
+    }
+
+    benchmarkStatus.textContent = `${evaluation.scenes.length} held-out scenes · ${report.configuration.frameLimit} frames / 5 s`;
+    benchmarkNote.textContent = `Selected on the tuning suite: local ${report.selection.local.threshold}% / `
+      + `${report.selection.local.blockWidth}×${report.selection.local.blockHeight} block. `
+      + 'Recall is frame capture inside a labeled window, not model understanding.';
+    const missedByStrategy = new Map<string, number>();
+    for (const failure of report.failureCases) {
+      if (failure.suite !== 'evaluation') continue;
+      missedByStrategy.set(failure.strategy, (missedByStrategy.get(failure.strategy) ?? 0) + 1);
+    }
+    const missedText = report.configuration.strategies
+      .map((strategy) => `${strategy.label}: ${missedByStrategy.get(strategy.id) ?? 0}`)
+      .join(' · ');
+    const unobservable = evaluation.aggregates[0]?.unobservableEvents ?? 0;
+    benchmarkFailureNote.textContent = `Held-out observable misses — ${missedText}. `
+      + `${unobservable} labeled event${unobservable === 1 ? '' : 's'} fell inside capture gaps and are excluded from recall. `
+      + 'Full failure cases are in benchmarks/results/latest.md.';
+  }
+
+  async function loadBenchmark(): Promise<void> {
+    try {
+      const response = await fetch(import.meta.env.BASE_URL + 'benchmark/latest.json', { cache: 'no-cache' });
+      if (!response.ok) throw new Error(`Benchmark request returned ${response.status}.`);
+      renderBenchmark(await response.json() as BenchmarkReport);
+    } catch (error) {
+      benchmarkStatus.textContent = 'Unavailable';
+      benchmarkBody.replaceChildren();
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 7;
+      cell.textContent = 'Benchmark results are not available. Run npm run benchmark.';
+      row.append(cell);
+      benchmarkBody.append(row);
+      benchmarkNote.textContent = 'The live sampler still works; benchmark data is a generated static artifact.';
+      console.error('Could not load benchmark results.', error);
+    }
+  }
+
   applyThreshold();
   applyBudget();
+  applyLocalThreshold();
+  applyBlockSize();
+  syncStrategyControls();
   updateAgentView();
   setSourceModeUi();
   presentSnapshot(session);
@@ -425,6 +542,8 @@ function runDemo(): void {
   refreshTimer = window.setInterval(() => {
     if (document.visibilityState === 'visible') presentSnapshot(session);
   }, REFRESH_INTERVAL_MS);
+
+  void loadBenchmark();
 }
 
 try {

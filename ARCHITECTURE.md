@@ -1,6 +1,6 @@
 # Architecture
 
-SemanticStream selects context from a live stream for an AI agent operating under limited bandwidth and compute. Phase 0 samples a procedural visual stream and delivers selected frames to an in-browser mock agent. Phase 1A adds a local video adapter that produces the same `StreamFrame<VisualFrame>` sequence, so both sampling policies continue to share one input path.
+SemanticStream selects context from a live stream for an AI agent operating under limited bandwidth and compute. Phase 0 sampled a procedural visual stream and delivered selected frames to an in-browser mock agent. Phase 1A added a local video adapter that produces the same `StreamFrame<VisualFrame>` sequence. Phase 1B adds a deterministic, budget-aware event evaluation with global, local-block, and hybrid adaptive policies.
 
 ## Runtime path
 
@@ -11,9 +11,12 @@ flowchart LR
   SourceCanvas --> Fixed[Fixed sampler]
   SourceCanvas --> Adaptive[Adaptive sampler]
   SourceCanvas --> Original[Original view]
-  SourceCanvas --> Thumb[Shared RGBA thumbnail]
+  SourceCanvas --> Thumb[Shared 96 × 54 RGBA thumbnail]
   Thumb --> Fixed
-  Thumb --> Adaptive
+  Thumb --> Strategy[AdaptiveStrategyPolicy]
+  Strategy --> Global[Global RGB baseline]
+  Strategy --> Local[Local block detector]
+  Strategy --> Hybrid[Hybrid OR]
   Fixed --> FixedSink[Fixed mock sink]
   Adaptive --> AdaptiveSink[Adaptive mock sink]
   Fixed --> Metrics[Metrics + rates + timeline]
@@ -22,20 +25,23 @@ flowchart LR
   AdaptiveSink --> Agent
 ```
 
-Only one source is active. The procedural source draws its deterministic scene into the source Canvas. The video adapter draws the current video frame into the same Canvas, letterboxed to 720 × 405. Both call the same synchronous frame listener. Both samplers evaluate exactly the same capture sequence at runtime. Each has its own policy state, budget, metrics, rates, and mock sink. Selecting an agent view changes which sink and metrics row are visible. Budget and threshold updates apply to both samplers and preserve previous sends.
+Only one source is active. The procedural source draws its deterministic scene into the source Canvas. The video adapter draws the current video frame into the same Canvas, letterboxed to 720 × 405. Both call the same synchronous frame listener. Both samplers evaluate exactly the same capture sequence at runtime. Each has its own policy state, budget, metrics, rates, and mock sink. Selecting an agent view changes which sink and metrics row are visible.
 
-| Concept | Phase 1A contract |
+| Concept | Phase 1B contract |
 | --- | --- |
 | `StreamSource<T>` | Calls a synchronous listener and supports start and stop. The procedural adapter aims for 30 captures per second using `requestAnimationFrame`. The video adapter uses `requestVideoFrameCallback` when available and a `requestAnimationFrame` fallback otherwise. |
 | `StreamFrame<T>` | A one-based sequence, a monotonic capture timestamp in milliseconds, and the adapter's payload. The source Canvas is borrowed until the listener returns. |
 | `VisualFrame` | The borrowed source Canvas, a source position (`elapsedMs`), optional video `mediaTimeMs`, monotonic `sessionElapsedMs`, and a phase (`Still`, `Slow motion`, `Fast motion`, `Text event`, or `Video`). |
-| `ChangeDetector<Sample>` | Mean absolute RGB channel difference, normalized to 0–100%, on matching RGBA thumbnails. The shared adapter creates one 96 × 54 sample per input frame. |
+| `ChangeDetector<Sample>` | Mean absolute RGB channel difference, normalized to 0–100%, on matching RGBA thumbnails. `meanRgbDifference` remains the baseline. The shared adapter creates one 96 × 54 sample per input frame. |
+| `BlockChangeDetector` | Splits a matching 96 × 54 sample into configurable blocks, computes the same RGB-only normalized difference per block, and reports the maximum difference and the number of changed blocks. Edge blocks may be smaller. |
 | `SamplingPolicy<Sample>` | Observes the current sample, session origin, and last delivered sample and timestamp. Fixed sampling targets four 250 ms slots per second. Adaptive sampling compares the current thumbnail with the last one accepted by its sink. |
+| `AdaptiveStrategyPolicy` | Selects `global`, `local`, or `hybrid` without replacing the `Sampler`. Hybrid means global change OR changed local blocks. Threshold and block-size setters apply on the next frame. |
 | `BudgetController` | Enforces a rolling cap in frames per five seconds. The default cap is 20. A delivery exactly 5,000 ms old has expired. |
 | `ContextSink<T>` | Returns whether it synchronously accepted the frame. Each mock sink copies accepted images into its own display Canvas, replacing its previous image. |
 | `VideoSource` | Owns the video element listeners, the local Object URL, frame-callback handles, and the `HTMLVideoElement` → Canvas capture path. `dispose()` releases all of them; `stop()` only pauses capture. |
-| `SamplingSession` | Owns both samplers, both mock sinks, the shared thumbnail reader, the bounded decision timeline, and the rolling rate meters for one uninterrupted comparison session. |
-| `ContextBuffer` | Reserved for bounded storage and explicit retrieval by sequence or time range. Phase 1A still has no raw-frame archive or retrieval interface. |
+| `SamplingSession` | Owns both samplers, both mock sinks, the shared thumbnail reader, the adaptive strategy policy, the bounded decision timeline, and the rolling rate meters for one uninterrupted comparison session. |
+| `Benchmark replay` | A browser-independent Node/browser-neutral runner that feeds deterministic `ReplayFrame` samples into separately constructed samplers. Event labels are held outside the replay input. |
+| `ContextBuffer` | Reserved for Phase 2 bounded storage and explicit retrieval by sequence or time range. Phase 1B still has no raw-frame archive or retrieval interface. |
 | `MetricsCollector` | Keeps cumulative counts, per-reason filtered counts, and mean processing latency in constant space for each strategy. |
 
 ## Online decisions and time
@@ -44,9 +50,28 @@ The procedural adapter samples its deterministic scene using animation time. It 
 
 The video adapter stamps every emitted frame with `performance.now()`. That value is the sampler's ordering clock. Video media time is a separate field used for display and seek state. It can jump backward or forward when the user seeks, so a load, seek, or restart starts a new sampling session instead of feeding a backward timestamp to a sampler.
 
-The sampler requests delivery for the first frame, for an available frame arriving at least 1,500 ms after the last delivery, or when the selected policy requests it, in that order. Fixed slots are anchored to the first input timestamp and allow a single policy-driven send per slot. A slot without an acceptable frame can expire. Adaptive delivery triggers when mean RGB change meets the threshold, which defaults to 1.5%. Comparing against the last accepted frame lets successive small changes accumulate.
+The sampler requests delivery for the first frame, for an available frame arriving at least 1,500 ms after the last delivery, or when the selected policy requests it, in that order. Fixed slots are anchored to the first input timestamp and allow a single policy-driven send per slot. A slot without an acceptable frame can expire. Adaptive delivery triggers when the selected rule returns true. Comparing against the last accepted frame lets successive small changes accumulate.
 
 The hard minimum of 125 ms applies to all candidates after the first delivery. A candidate then needs a free slot in the rolling budget. A full budget or busy sink can extend silence beyond 1,500 ms. Candidates are discarded immediately and all gates are checked again on the next arrival. A rejected candidate consumes neither budget nor the adaptive baseline.
+
+## Local block detection and strategy composition
+
+`meanRgbDifference` remains the baseline. `BlockChangeDetector` adds a spatially local rule without changing the stream contract:
+
+1. The 96 × 54 RGBA sample is divided into a configurable grid (6, 8, or 12 pixel blocks in the UI; any positive block size in the core).
+2. For each block, the sum of absolute RGB differences is normalized by the block's pixel count and 255 per channel, giving a 0–100% block difference.
+3. A block counts as changed when its difference is at least the configured local threshold.
+4. The local policy triggers when at least `minChangedBlocks` blocks changed. The default is one changed block.
+
+The detector reads only the last accepted sample and the current sample. It receives no event regions, event labels, or future frames. Edge blocks are clipped to the sample dimensions. Alpha is ignored, matching the baseline's RGB-only definition.
+
+`AdaptiveStrategyPolicy` owns one global `AdaptiveSamplingPolicy` and one `LocalSamplingPolicy`:
+
+- `global` uses only the whole-frame mean RGB difference.
+- `local` uses only the block detector.
+- `hybrid` returns global OR local, short-circuiting when global already triggers.
+
+The strategy is mutable inside the policy object, so switching the live strategy does not replace the `Sampler` or reset either branch. The last accepted sample is still the baseline for the next decision. The rolling budget, minimum interval, silence refresh, metrics, and sink are unchanged.
 
 ## Video lifecycle
 
@@ -70,6 +95,45 @@ Input and sent rates use `RollingRate` meters with a two-second window. Until th
 
 Filtered reasons are counted by `MetricsCollector` as `policy`, `interval`, `budget`, or `backpressure`. The cumulative counts are independent of the bounded timeline, so the reason totals survive after the timeline overwrites old entries. A new session clears both.
 
+## Deterministic benchmark
+
+The benchmark is deliberately separated from the browser UI:
+
+- `src/benchmark/fixtures.ts` builds replay scenes. Each `ReplayFrame` contains only a sequence, a deterministic timestamp, and an RGBA sample. Event annotations are stored on `BenchmarkScene.events`, not in the frames.
+- `src/benchmark/runner.ts` constructs a fresh `BudgetController` and `Sampler` per scene/strategy, feeds the same frames in order, and returns deliveries plus measured processing times. It never passes the event list to a policy.
+- The evaluator runs after replay and uses the event labels to compute recall, missed events, first-capture latency, outside-event sends, and an independent budget audit.
+
+### Fixtures
+
+- Six tuning scenes and six held-out evaluation scenes, each six seconds at 30 fps, 96 × 54 RGBA.
+- Event families: local high-contrast text, 100 ms brief events, low-contrast region changes, slow whole-frame brightness ramps, a local event during irrelevant background motion, and a capture pause containing a hidden event.
+- Tuning and evaluation scenes use different timings, positions, text, and contrast values. The evaluation suite is not used to choose parameters.
+- A capture pause removes frames from the replay sequence, so a hidden event has no input frame at all.
+
+### Metrics
+
+- **Inputs**: replay frames evaluated by a strategy.
+- **Sent**: accepted deliveries.
+- **Event recall**: observable events with at least one delivered timestamp inside `[startMs, endMs)`, divided by observable events. A hidden event inside a capture gap is excluded from the denominator and reported separately.
+- **Missed**: observable events with no delivery inside their window.
+- **First capture latency**: first delivered timestamp in the event window minus `startMs`, averaged only over captured events.
+- **Processing time**: wall-clock time around each `Sampler.process` call. It varies between runs; frame decisions do not.
+- **Budget violations**: an independent audit counts a sent timestamp as a violation when the previous deliveries in `(t − 5,000, t]` already reach the frame limit. The sampler should produce zero.
+- **Sends outside events**: deliveries outside every labeled event window. This is a diagnostic, not a precision score, because the fixture event set is sparse.
+
+### Parameter selection and artifacts
+
+The tuning suite evaluates a small grid of local thresholds and block sizes for both local and hybrid rules. Selection maximizes the worst-case local/hybrid recall, then total recall, then minimizes sends outside labeled events, then total sends. The chosen configuration is applied unchanged to the evaluation suite.
+
+`npm run benchmark` writes:
+
+- `benchmarks/results/latest.json`
+- `benchmarks/results/latest.csv`
+- `benchmarks/results/latest.md`
+- `public/benchmark/latest.json` for the in-page benchmark panel
+
+The report includes per-scene results, aggregate results, parameter-selection evidence, observable misses, and unobservable events. The evaluation suite is held out; the latest results are committed as generated artifacts.
+
 ## Concurrency, ownership, and measurement
 
 Capture, thumbnail preparation, both decisions, and sink copies run synchronously on the browser main thread. There is no frame queue or catch-up work. A busy sink can decline a candidate via its return value. A slow synchronous sink delays the animation or video callback and can reduce the capture rate for both branches. Future asynchronous sinks will need explicit ownership transfer and a bounded overflow policy.
@@ -78,8 +142,12 @@ A capture reuses the original source Canvas. The renderer, thumbnail Canvas, two
 
 The reported mean processing latency includes the shared thumbnail preparation once per branch and that branch's synchronous decision and any accepted Canvas copy. It excludes scene or video rendering, the other branch's work, and UI updates. Input counts are captured frames each sampler evaluates; both samplers see the same sequence. Filtered share is (input − accepted) / input. It includes policy omissions, interval and budget blocks, and sink declines.
 
-The dashboard also shows rolling input and sent rates, the difference in delivered frame counts, and the bounded decision timeline. These measures describe browser frame processing and delivery volume. They are not token, API-call, or cost measurements.
+The benchmark processes one scene at a time and retains only the current scene's samples, delivery list, processing samples, and decisions. Its arrays are bounded by fixture length. The generated JSON/CSV/Markdown files are static artifacts; the app does not run the benchmark in the browser. The dashboard's processing numbers are wall-clock diagnostics, not token or cost measurements.
 
 ## Limits
 
-Low-area changes, brief text, and RGB changes attenuated by downsampling can fall below the global threshold. Capture cadence, a fixed slot boundary, a full budget, minimum spacing, or a busy sink can hide a short event entirely. Maximum silence provides refresh opportunities and cannot recover an event. A video that is paused, stalled, hidden, or seeking produces no input frames, and there is no catch-up. Codec support and autoplay policy are controlled by the browser. Phase 1A cannot recover omitted content, estimate model token usage, or guarantee event delivery. Raw-frame retrieval, labeled event recall, local-region change detection, and remote agents remain future work.
+Low-area changes, brief text, and RGB changes attenuated by downsampling can fall below a global threshold. A local block detector can react to irrelevant local motion as readily as to a labeled event. The benchmark demonstrates one such failure: background motion consumes the rolling budget before a later event, so local and hybrid miss it even though they send many frames. A fixed schedule, a compressed local event, or a capture gap can also hide an event entirely. Maximum silence provides refresh opportunities and cannot recover an event.
+
+Recall measures only whether a frame was delivered inside a defined visual event window. It does not measure whether a vision model or language model understood the event, and it does not measure task success. The synthetic fixtures are small, 96 × 54, and intentionally sparse. The event labels are evaluator-only; a real deployment would need an independent labeling and evaluation pipeline.
+
+Phase 1B does not implement raw-frame retrieval, active information request, GPU inference, model APIs, or a backend. Those belong to Phase 2 and later work.
