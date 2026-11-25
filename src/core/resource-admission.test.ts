@@ -65,3 +65,22 @@ describe('unified resource admission', () => {
     }))).toThrow(RangeError);
   });
 });
+
+it('keeps outstanding spend when the current limit drops sharply', () => {
+  const admission = new ResourceAdmissionController(config({
+    realtime: { windowMs: 5_000, maxFrames: 8, maxBytes: 1_000 },
+    total: { windowMs: 5_000, maxFrames: 8, maxBytes: 1_000 },
+  }));
+  for (let t = 0; t < 8; t += 1) admission.record(t, 100);
+  admission.setTotalFrameLimit(1);
+  // Account for a delivery already admitted under the previous limit.
+  admission.record(8, 100);
+  expect(admission.snapshot(8).total.usedFrames).toBe(9);
+});
+
+it('rejects a backwards accounting timestamp before expiring usage', () => {
+  const admission = new ResourceAdmissionController(config());
+  admission.record(100, 100);
+  expect(() => admission.record(99, 100)).toThrow(RangeError);
+  expect(admission.snapshot(100).total.usedFrames).toBe(1);
+});

@@ -85,3 +85,54 @@ describe('decision engine', () => {
     expect(calls).toBe(2);
   });
 });
+
+function deferredProvider() {
+  const calls: Array<{ resolve: (value: DecisionProviderResult) => void; signal?: AbortSignal }> = [];
+  const provider: DecisionProvider = {
+    id: 'controlled',
+    scoreKind: 'heuristic',
+    decide: (_state, signal) => new Promise((resolve) => calls.push({ resolve, signal })),
+  };
+  return { calls, provider };
+}
+
+describe('decision lifecycle regressions', () => {
+  it('does not start overlapping evaluations for an unchanged task', async () => {
+    const { calls, provider } = deferredProvider();
+    const scheduler = new DecisionScheduler(new DecisionEngine(provider, fallback), 100);
+    const older = scheduler.evaluate(state(0));
+    const newer = scheduler.evaluate(state(100));
+    expect(calls).toHaveLength(1);
+    calls[0].resolve(result('SEND_FRAME'));
+    await older;
+    await newer;
+    expect(scheduler.latest?.action).toBe('SEND_FRAME');
+  });
+
+  it.each(['session', 'roi'])('ignores a late response after changing %s', async (changed) => {
+    const { calls, provider } = deferredProvider();
+    const scheduler = new DecisionScheduler(new DecisionEngine(provider, fallback), 100);
+    const initial = state(0);
+    const old = scheduler.evaluate(initial);
+    const next = changed === 'session'
+      ? { ...initial, sessionId: 'next' }
+      : { ...initial, task: { ...initial.task, roi: { x: 0, y: 0, width: 1, height: 1 } } };
+    const current = scheduler.evaluate({ ...next, timestampMs: 100 });
+    calls[1].resolve(result('DROP'));
+    await current;
+    calls[0].resolve(result('SEND_FRAME'));
+    await old;
+    expect(calls[0].signal?.aborted).toBe(true);
+    expect(scheduler.latest?.action).toBe('DROP');
+  });
+
+  it('rejects malformed candidate metadata from both providers', async () => {
+    const invalid: DecisionProvider = {
+      ...fallback,
+      decide: () => ({ ...result('SEND_FRAME'), candidates: [{ ...result('SEND_FRAME').candidates[0], score: NaN }] }),
+    };
+    const decision = await new DecisionEngine(invalid, invalid).decide(state());
+    expect(decision.action).toBe('WAIT');
+    expect(decision.degraded).toBe(true);
+  });
+});
