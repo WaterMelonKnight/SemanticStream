@@ -5,7 +5,7 @@ import type { ScenePhase } from './scene';
 
 const CAPTURE_INTERVAL_MS = 1_000 / 30;
 
-export type VisualPhase = ScenePhase | 'Video';
+export type VisualPhase = ScenePhase | 'Video' | 'Camera' | 'Monitor';
 
 export interface VisualFrame {
   readonly canvas: HTMLCanvasElement;

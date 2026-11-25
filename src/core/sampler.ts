@@ -16,6 +16,7 @@ export class Sampler<T, Sample> {
   private firstTimestampMs: number | undefined;
   private previousTimestampMs = -Infinity;
   private deliveredAtMs: number | null = null;
+  private selection: 'first-frame' | 'silence-refresh' | 'policy' | null = null;
   private delivering = false;
   private lastDelivery: SamplingContext<Sample>['lastDelivery'] | undefined;
 
@@ -54,6 +55,10 @@ export class Sampler<T, Sample> {
     return this.deliveredAtMs;
   }
 
+  get lastSelection() {
+    return this.selection;
+  }
+
   snapshot(): MetricsSnapshot {
     return this.metrics.snapshot();
   }
@@ -79,6 +84,8 @@ export class Sampler<T, Sample> {
       const deliveredAtMs = this.deliveryClock?.() ?? timestampMs;
       reservation.commit(deliveredAtMs);
       this.deliveredAtMs = deliveredAtMs;
+      this.selection = !lastDelivery ? 'first-frame'
+        : timestampMs >= lastDelivery.timestampMs + this.timing.maximumSilenceMs ? 'silence-refresh' : 'policy';
       this.lastDelivery = { timestampMs, sample };
       return 'sent';
     } finally {

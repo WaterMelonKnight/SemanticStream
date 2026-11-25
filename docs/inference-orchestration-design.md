@@ -46,4 +46,4 @@ Jev-style models can score evidence relevance, urgency, dispatch proposals, or w
 
 ## Phase 4A
 
-Implement one bounded, in-process inference scheduler against a scripted fake streaming provider. Run concurrent tasks against one logical endpoint with at least two slots, one output coordinator and a frozen visual evidence snapshot per task. Test ordering, saturation, deadlines, ignored abort and late partial suppression, plus provisional usage when final usage is absent. Exercise the sequence deterministically in Node and report the failure cases. Real provider adapters, heterogeneous routing, native bidirectional transport, pricing and billing can wait for a verified single-endpoint lifecycle.
+Phase 4A implements the in-process, single-endpoint lifecycle with one- and two-slot modes, bounded queues and the same output coordinator for both schedulers. The scripted adapter provides ordered partials, delayed terminal evidence, cancellation faults and unknown usage. The [Phase 4A implementation](phase4a-duplex-runtime.md) documents the concrete API and future adapter requirements.

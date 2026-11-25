@@ -1,0 +1,1418 @@
+{
+  "kind": "simulation",
+  "description": "Deterministic scripted inference. These timings do not measure LLM performance.",
+  "limits": {
+    "transport": {
+      "windowMs": 500,
+      "maxFrames": 3,
+      "maxBytes": 360
+    },
+    "tokensPerTask": 32,
+    "totalTokens": 320,
+    "queue": 3
+  },
+  "variants": [
+    {
+      "name": "Serial FIFO",
+      "policy": "fifo",
+      "slots": 1,
+      "taskCount": 23,
+      "starts": 12,
+      "startLatency": {
+        "count": 12,
+        "p50Ms": 5,
+        "p95Ms": 747
+      },
+      "firstOutputLatency": {
+        "count": 12,
+        "p50Ms": 105,
+        "p95Ms": 847
+      },
+      "expiries": 4,
+      "deadlineViolationRate": 0.17391304347826086,
+      "staleOutputLeaks": 0,
+      "blockedPartials": 2,
+      "invalidInferenceCount": 3,
+      "invalidInferenceShare": 0.25,
+      "peakSlots": 1,
+      "peakQueue": 3,
+      "critical": {
+        "id": 9,
+        "eventId": 9,
+        "outcome": "rejected",
+        "reason": "Queue full",
+        "startDelayMs": null,
+        "firstOutputDelayMs": null
+      },
+      "usage": {
+        "bytesDispatched": 416,
+        "tokensSettled": 42,
+        "tokensProvisional": 32
+      },
+      "tasks": [
+        {
+          "id": 5,
+          "eventId": 5,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 6,
+          "eventId": 6,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 7,
+          "eventId": 7,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 8,
+          "eventId": 8,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 9,
+          "eventId": 9,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Critical alert"
+        },
+        {
+          "id": 10,
+          "eventId": 10,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Short deadline"
+        },
+        {
+          "id": 1,
+          "eventId": 1,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 2,
+          "eventId": 2,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": 390,
+          "firstOutputDelayMs": 490,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 3,
+          "eventId": 3,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 4,
+          "eventId": 4,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 11,
+          "eventId": 11,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 60,
+          "event": "Parent finishes"
+        },
+        {
+          "id": 12,
+          "eventId": 12,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 195,
+          "firstOutputDelayMs": 295,
+          "event": "Depends on successful parent"
+        },
+        {
+          "id": 13,
+          "eventId": 13,
+          "outcome": "invalidated",
+          "reason": "Channel superseded",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Ignores cancellation"
+        },
+        {
+          "id": 14,
+          "eventId": 14,
+          "outcome": "invalidated",
+          "reason": "Dependency did not complete",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Depends on superseded parent"
+        },
+        {
+          "id": 16,
+          "eventId": 16,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Late terminal"
+        },
+        {
+          "id": 15,
+          "eventId": 15,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 130,
+          "firstOutputDelayMs": 230,
+          "event": "New observation supersedes previous"
+        },
+        {
+          "id": 17,
+          "eventId": 17,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 5,
+          "firstOutputDelayMs": 105,
+          "event": "Independent task during cancellation"
+        },
+        {
+          "id": 18,
+          "eventId": 18,
+          "outcome": "failed",
+          "reason": "Scripted provider error",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Scripted failure"
+        },
+        {
+          "id": 23,
+          "eventId": 23,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Transfer burst E"
+        },
+        {
+          "id": 19,
+          "eventId": 19,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Transfer burst A"
+        },
+        {
+          "id": 20,
+          "eventId": 20,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 249,
+          "firstOutputDelayMs": 349,
+          "event": "Transfer burst B"
+        },
+        {
+          "id": 21,
+          "eventId": 21,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 498,
+          "firstOutputDelayMs": 598,
+          "event": "Transfer burst C"
+        },
+        {
+          "id": 22,
+          "eventId": 22,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 747,
+          "firstOutputDelayMs": 847,
+          "event": "Transfer burst D"
+        }
+      ],
+      "failures": [
+        {
+          "id": 5,
+          "eventId": 5,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 6,
+          "eventId": 6,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 7,
+          "eventId": 7,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 8,
+          "eventId": 8,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 9,
+          "eventId": 9,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Critical alert"
+        },
+        {
+          "id": 10,
+          "eventId": 10,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Short deadline"
+        },
+        {
+          "id": 2,
+          "eventId": 2,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 3,
+          "eventId": 3,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 4,
+          "eventId": 4,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 13,
+          "eventId": 13,
+          "outcome": "invalidated",
+          "reason": "Channel superseded",
+          "event": "Ignores cancellation"
+        },
+        {
+          "id": 14,
+          "eventId": 14,
+          "outcome": "invalidated",
+          "reason": "Dependency did not complete",
+          "event": "Depends on superseded parent"
+        },
+        {
+          "id": 16,
+          "eventId": 16,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Late terminal"
+        },
+        {
+          "id": 18,
+          "eventId": 18,
+          "outcome": "failed",
+          "reason": "Scripted provider error",
+          "event": "Scripted failure"
+        },
+        {
+          "id": 23,
+          "eventId": 23,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Transfer burst E"
+        }
+      ]
+    },
+    {
+      "name": "Concurrent FIFO",
+      "policy": "fifo",
+      "slots": 2,
+      "taskCount": 23,
+      "starts": 12,
+      "startLatency": {
+        "count": 12,
+        "p50Ms": 0,
+        "p95Ms": 380
+      },
+      "firstOutputLatency": {
+        "count": 11,
+        "p50Ms": 100,
+        "p95Ms": 480
+      },
+      "expiries": 2,
+      "deadlineViolationRate": 0.08695652173913043,
+      "staleOutputLeaks": 0,
+      "blockedPartials": 5,
+      "invalidInferenceCount": 4,
+      "invalidInferenceShare": 0.3333333333333333,
+      "peakSlots": 2,
+      "peakQueue": 3,
+      "critical": {
+        "id": 9,
+        "eventId": 9,
+        "outcome": "rejected",
+        "reason": "Queue full",
+        "startDelayMs": null,
+        "firstOutputDelayMs": null
+      },
+      "usage": {
+        "bytesDispatched": 388,
+        "tokensSettled": 38,
+        "tokensProvisional": 32
+      },
+      "tasks": [
+        {
+          "id": 6,
+          "eventId": 6,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 7,
+          "eventId": 7,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 8,
+          "eventId": 8,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 9,
+          "eventId": 9,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Critical alert"
+        },
+        {
+          "id": 10,
+          "eventId": 10,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Short deadline"
+        },
+        {
+          "id": 1,
+          "eventId": 1,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 2,
+          "eventId": 2,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 4,
+          "eventId": 4,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 5,
+          "eventId": 5,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 3,
+          "eventId": 3,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": 380,
+          "firstOutputDelayMs": 480,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 11,
+          "eventId": 11,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 60,
+          "event": "Parent finishes"
+        },
+        {
+          "id": 12,
+          "eventId": 12,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 195,
+          "firstOutputDelayMs": 295,
+          "event": "Depends on successful parent"
+        },
+        {
+          "id": 13,
+          "eventId": 13,
+          "outcome": "invalidated",
+          "reason": "Channel superseded",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Ignores cancellation"
+        },
+        {
+          "id": 14,
+          "eventId": 14,
+          "outcome": "invalidated",
+          "reason": "Dependency did not complete",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Depends on superseded parent"
+        },
+        {
+          "id": 15,
+          "eventId": 15,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "New observation supersedes previous"
+        },
+        {
+          "id": 16,
+          "eventId": 16,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": null,
+          "event": "Late terminal"
+        },
+        {
+          "id": 17,
+          "eventId": 17,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Independent task during cancellation"
+        },
+        {
+          "id": 18,
+          "eventId": 18,
+          "outcome": "failed",
+          "reason": "Scripted provider error",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Scripted failure"
+        },
+        {
+          "id": 19,
+          "eventId": 19,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Transfer burst A"
+        },
+        {
+          "id": 20,
+          "eventId": 20,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Transfer burst B"
+        },
+        {
+          "id": 22,
+          "eventId": 22,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Transfer burst D"
+        },
+        {
+          "id": 23,
+          "eventId": 23,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Transfer burst E"
+        },
+        {
+          "id": 21,
+          "eventId": 21,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 248,
+          "firstOutputDelayMs": 348,
+          "event": "Transfer burst C"
+        }
+      ],
+      "failures": [
+        {
+          "id": 6,
+          "eventId": 6,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 7,
+          "eventId": 7,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 8,
+          "eventId": 8,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 9,
+          "eventId": 9,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Critical alert"
+        },
+        {
+          "id": 10,
+          "eventId": 10,
+          "outcome": "rejected",
+          "reason": "Queue full",
+          "event": "Short deadline"
+        },
+        {
+          "id": 4,
+          "eventId": 4,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 5,
+          "eventId": 5,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 3,
+          "eventId": 3,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 13,
+          "eventId": 13,
+          "outcome": "invalidated",
+          "reason": "Channel superseded",
+          "event": "Ignores cancellation"
+        },
+        {
+          "id": 14,
+          "eventId": 14,
+          "outcome": "invalidated",
+          "reason": "Dependency did not complete",
+          "event": "Depends on superseded parent"
+        },
+        {
+          "id": 16,
+          "eventId": 16,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Late terminal"
+        },
+        {
+          "id": 17,
+          "eventId": 17,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "event": "Independent task during cancellation"
+        },
+        {
+          "id": 18,
+          "eventId": 18,
+          "outcome": "failed",
+          "reason": "Scripted provider error",
+          "event": "Scripted failure"
+        },
+        {
+          "id": 22,
+          "eventId": 22,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "event": "Transfer burst D"
+        },
+        {
+          "id": 23,
+          "eventId": 23,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "event": "Transfer burst E"
+        }
+      ]
+    },
+    {
+      "name": "SemanticStream",
+      "policy": "context-aware",
+      "slots": 2,
+      "taskCount": 23,
+      "starts": 11,
+      "startLatency": {
+        "count": 11,
+        "p50Ms": 0,
+        "p95Ms": 245
+      },
+      "firstOutputLatency": {
+        "count": 10,
+        "p50Ms": 100,
+        "p95Ms": 345
+      },
+      "expiries": 2,
+      "deadlineViolationRate": 0.08695652173913043,
+      "staleOutputLeaks": 0,
+      "blockedPartials": 4,
+      "invalidInferenceCount": 3,
+      "invalidInferenceShare": 0.2727272727272727,
+      "peakSlots": 2,
+      "peakQueue": 3,
+      "critical": {
+        "id": 9,
+        "eventId": 9,
+        "outcome": "completed",
+        "reason": "Upstream completed",
+        "startDelayMs": 0,
+        "firstOutputDelayMs": 20
+      },
+      "usage": {
+        "bytesDispatched": 368,
+        "tokensSettled": 36,
+        "tokensProvisional": 32
+      },
+      "tasks": [
+        {
+          "id": 2,
+          "eventId": 2,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 3,
+          "eventId": 3,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 4,
+          "eventId": 4,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 5,
+          "eventId": 5,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 6,
+          "eventId": 6,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 7,
+          "eventId": 7,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 8,
+          "eventId": 8,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 10,
+          "eventId": 10,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Short deadline"
+        },
+        {
+          "id": 9,
+          "eventId": 9,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 20,
+          "event": "Critical alert"
+        },
+        {
+          "id": 1,
+          "eventId": 1,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 11,
+          "eventId": 11,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 60,
+          "event": "Parent finishes"
+        },
+        {
+          "id": 12,
+          "eventId": 12,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 195,
+          "firstOutputDelayMs": 295,
+          "event": "Depends on successful parent"
+        },
+        {
+          "id": 13,
+          "eventId": 13,
+          "outcome": "invalidated",
+          "reason": "Channel superseded",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Ignores cancellation"
+        },
+        {
+          "id": 14,
+          "eventId": 14,
+          "outcome": "invalidated",
+          "reason": "Dependency did not complete",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Depends on superseded parent"
+        },
+        {
+          "id": 15,
+          "eventId": 15,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "New observation supersedes previous"
+        },
+        {
+          "id": 16,
+          "eventId": 16,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": null,
+          "event": "Late terminal"
+        },
+        {
+          "id": 17,
+          "eventId": 17,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Independent task during cancellation"
+        },
+        {
+          "id": 18,
+          "eventId": 18,
+          "outcome": "failed",
+          "reason": "Scripted provider error",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Scripted failure"
+        },
+        {
+          "id": 19,
+          "eventId": 19,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Transfer burst A"
+        },
+        {
+          "id": 20,
+          "eventId": 20,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Transfer burst B"
+        },
+        {
+          "id": 21,
+          "eventId": 21,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Transfer burst C"
+        },
+        {
+          "id": 22,
+          "eventId": 22,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Transfer burst D"
+        },
+        {
+          "id": 23,
+          "eventId": 23,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 245,
+          "firstOutputDelayMs": 345,
+          "event": "Transfer burst E"
+        }
+      ],
+      "failures": [
+        {
+          "id": 2,
+          "eventId": 2,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 3,
+          "eventId": 3,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 4,
+          "eventId": 4,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 5,
+          "eventId": 5,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 6,
+          "eventId": 6,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 7,
+          "eventId": 7,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 8,
+          "eventId": 8,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 10,
+          "eventId": 10,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Short deadline"
+        },
+        {
+          "id": 13,
+          "eventId": 13,
+          "outcome": "invalidated",
+          "reason": "Channel superseded",
+          "event": "Ignores cancellation"
+        },
+        {
+          "id": 14,
+          "eventId": 14,
+          "outcome": "invalidated",
+          "reason": "Dependency did not complete",
+          "event": "Depends on superseded parent"
+        },
+        {
+          "id": 16,
+          "eventId": 16,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Late terminal"
+        },
+        {
+          "id": 17,
+          "eventId": 17,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "event": "Independent task during cancellation"
+        },
+        {
+          "id": 18,
+          "eventId": 18,
+          "outcome": "failed",
+          "reason": "Scripted provider error",
+          "event": "Scripted failure"
+        },
+        {
+          "id": 21,
+          "eventId": 21,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "event": "Transfer burst C"
+        },
+        {
+          "id": 22,
+          "eventId": 22,
+          "outcome": "rejected",
+          "reason": "Rolling request/byte budget exhausted",
+          "event": "Transfer burst D"
+        }
+      ]
+    },
+    {
+      "name": "SemanticStream single-slot",
+      "policy": "context-aware",
+      "slots": 1,
+      "taskCount": 23,
+      "starts": 11,
+      "startLatency": {
+        "count": 11,
+        "p50Ms": 5,
+        "p95Ms": 748
+      },
+      "firstOutputLatency": {
+        "count": 11,
+        "p50Ms": 105,
+        "p95Ms": 848
+      },
+      "expiries": 3,
+      "deadlineViolationRate": 0.13043478260869565,
+      "staleOutputLeaks": 0,
+      "blockedPartials": 2,
+      "invalidInferenceCount": 2,
+      "invalidInferenceShare": 0.18181818181818182,
+      "peakSlots": 1,
+      "peakQueue": 3,
+      "critical": {
+        "id": 9,
+        "eventId": 9,
+        "outcome": "expired",
+        "reason": "Deadline expired",
+        "startDelayMs": null,
+        "firstOutputDelayMs": null
+      },
+      "usage": {
+        "bytesDispatched": 393,
+        "tokensSettled": 40,
+        "tokensProvisional": 32
+      },
+      "tasks": [
+        {
+          "id": 2,
+          "eventId": 2,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 3,
+          "eventId": 3,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 4,
+          "eventId": 4,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 5,
+          "eventId": 5,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 6,
+          "eventId": 6,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 7,
+          "eventId": 7,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 8,
+          "eventId": 8,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 10,
+          "eventId": 10,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Short deadline"
+        },
+        {
+          "id": 9,
+          "eventId": 9,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Critical alert"
+        },
+        {
+          "id": 1,
+          "eventId": 1,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Pixel noise"
+        },
+        {
+          "id": 11,
+          "eventId": 11,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 60,
+          "event": "Parent finishes"
+        },
+        {
+          "id": 12,
+          "eventId": 12,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 195,
+          "firstOutputDelayMs": 295,
+          "event": "Depends on successful parent"
+        },
+        {
+          "id": 13,
+          "eventId": 13,
+          "outcome": "invalidated",
+          "reason": "Channel superseded",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Ignores cancellation"
+        },
+        {
+          "id": 14,
+          "eventId": 14,
+          "outcome": "invalidated",
+          "reason": "Dependency did not complete",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Depends on superseded parent"
+        },
+        {
+          "id": 16,
+          "eventId": 16,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Late terminal"
+        },
+        {
+          "id": 15,
+          "eventId": 15,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 130,
+          "firstOutputDelayMs": 230,
+          "event": "New observation supersedes previous"
+        },
+        {
+          "id": 17,
+          "eventId": 17,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 5,
+          "firstOutputDelayMs": 105,
+          "event": "Independent task during cancellation"
+        },
+        {
+          "id": 18,
+          "eventId": 18,
+          "outcome": "failed",
+          "reason": "Scripted provider error",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Scripted failure"
+        },
+        {
+          "id": 22,
+          "eventId": 22,
+          "outcome": "invalidated",
+          "reason": "Displaced by higher priority",
+          "startDelayMs": null,
+          "firstOutputDelayMs": null,
+          "event": "Transfer burst D"
+        },
+        {
+          "id": 19,
+          "eventId": 19,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 0,
+          "firstOutputDelayMs": 100,
+          "event": "Transfer burst A"
+        },
+        {
+          "id": 23,
+          "eventId": 23,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 245,
+          "firstOutputDelayMs": 345,
+          "event": "Transfer burst E"
+        },
+        {
+          "id": 20,
+          "eventId": 20,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 499,
+          "firstOutputDelayMs": 599,
+          "event": "Transfer burst B"
+        },
+        {
+          "id": 21,
+          "eventId": 21,
+          "outcome": "completed",
+          "reason": "Upstream completed",
+          "startDelayMs": 748,
+          "firstOutputDelayMs": 848,
+          "event": "Transfer burst C"
+        }
+      ],
+      "failures": [
+        {
+          "id": 2,
+          "eventId": 2,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 3,
+          "eventId": 3,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 4,
+          "eventId": 4,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 5,
+          "eventId": 5,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 6,
+          "eventId": 6,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 7,
+          "eventId": 7,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 8,
+          "eventId": 8,
+          "outcome": "rejected",
+          "reason": "Repeated event coalesced",
+          "event": "Pixel noise"
+        },
+        {
+          "id": 10,
+          "eventId": 10,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Short deadline"
+        },
+        {
+          "id": 9,
+          "eventId": 9,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Critical alert"
+        },
+        {
+          "id": 13,
+          "eventId": 13,
+          "outcome": "invalidated",
+          "reason": "Channel superseded",
+          "event": "Ignores cancellation"
+        },
+        {
+          "id": 14,
+          "eventId": 14,
+          "outcome": "invalidated",
+          "reason": "Dependency did not complete",
+          "event": "Depends on superseded parent"
+        },
+        {
+          "id": 16,
+          "eventId": 16,
+          "outcome": "expired",
+          "reason": "Deadline expired",
+          "event": "Late terminal"
+        },
+        {
+          "id": 18,
+          "eventId": 18,
+          "outcome": "failed",
+          "reason": "Scripted provider error",
+          "event": "Scripted failure"
+        },
+        {
+          "id": 22,
+          "eventId": 22,
+          "outcome": "invalidated",
+          "reason": "Displaced by higher priority",
+          "event": "Transfer burst D"
+        }
+      ]
+    }
+  ]
+}

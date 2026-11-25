@@ -153,7 +153,11 @@ export class SamplingSession<T> {
       sequence: frame.sequence, timestampMs: frame.timestampMs, mediaTimeMs: metadata.mediaTimeMs, adaptive, fixed,
     });
 
-    return { decisions: { adaptive, fixed }, decision: this.observe(sample, adaptive) };
+    return {
+      decisions: { adaptive, fixed },
+      adaptiveSelection: adaptive === 'sent' ? this.samplers.adaptive.lastSelection : null,
+      decision: this.observe(sample, adaptive),
+    };
   }
 
   get adaptiveStrategy(): AdaptiveStrategy {

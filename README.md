@@ -23,6 +23,16 @@ The live demo compares a fixed sampler with a configurable adaptive sampler:
 
 Both branches use 125 ms minimum delivery spacing, a 1.5 s silence refresh, and the configured rolling five-second frame cap. The adaptive branch is the agent under test: its real-time deliveries go through the shared ex-ante admission gate and are recorded with the retrieval ledger. The fixed branch is the side-by-side comparison baseline.
 
+## Live Vision Runtime Lab
+
+Open **Live Vision Runtime Lab** from the visual demo or go to `/runtime.html` after starting Vite. Trigger a routine load change or a critical replica anomaly in the synthetic system monitor. Send a text turn during generation or interrupt an in-flight response. Select **Ignore cancel · unknown usage** to see output stop while an upstream slot drains and the token reservation becomes provisional. Use a recent frame sequence to retrieve a thumbnail through the visual budget.
+
+Choose **Serial FIFO**, **Concurrent FIFO**, or **SemanticStream** with one or two slots. Both policies use the same resource caps. Switch policies at the same slot count to compare scheduling and switch slot counts within a policy to compare concurrency. Reload for a fresh cumulative budget. Timeline entries distinguish known simulated monitor events from pixel-change candidates. Camera access requires permission and HTTPS or localhost. Camera and local video stay in the browser.
+
+Run `npm run benchmark:runtime` for the deterministic Node.js experiment. It exercises priority, queue pressure, dependencies, deadlines and ignored cancellation with a scripted provider. The published latencies measure this simulation. [Replay results](benchmarks/results/phase4a-runtime.md)
+
+The next integration is a server-side DeepSeek streaming adapter for text and terminal usage, followed by opt-in bounded evidence for a vision-capable model. Optional TTS would consume only coordinator-authorized output. [Adapter requirements](docs/phase4a-duplex-runtime.md#next-adapters)
+
 ## Bounded context buffer
 
 Each sampling session owns a bounded, local history of frames that were actually captured. It is not a video cache.
@@ -84,7 +94,7 @@ See [docs/decision-model-integration.md](docs/decision-model-integration.md) for
 
 ## Deterministic benchmark
 
-`npm run benchmark` runs the Phase 1B event benchmark and the corrected Phase 2 and Phase 3A replays. All three reuse the same deterministic 30 fps, 96 × 54 replay fixtures where applicable.
+`npm run benchmark` runs the Phase 1B event benchmark and the corrected Phase 2 and Phase 3A replays, then the Phase 4A runtime simulation. The three visual suites reuse the same deterministic 30 fps, 96 × 54 replay fixtures where applicable.
 
 Phase 2 compares:
 
@@ -151,8 +161,9 @@ Tests cover:
 - Phase 2 cue replay, cache bounds, background-motion recovery, event-label isolation for cue decisions, deterministic digests, and report generation.
 - Decision features, rule scoring, heuristic-vs-probability labeling, timeout/fallback, invalid-action rejection, low-frequency scheduling, task-aware replay, task ROI metrics, and Phase 3A report generation.
 - Existing sampler, video lifecycle, Phase 1B fixtures/benchmark, timeline, rate, and formatting tests.
+- Inference snapshot ownership, queue/dependency behavior, stale partial suppression, terminal evidence, reservations and deterministic replay across four scheduler/capacity combinations.
 
-GitHub Actions runs install, typecheck, all tests, all three benchmarks, and the static build. For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. No Cloudflare bindings are required.
+GitHub Actions runs install, typecheck, all tests, the four replay suites, and the two-page static build. For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. No Cloudflare bindings are required.
 
 ### Browser checklist
 
