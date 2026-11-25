@@ -213,6 +213,25 @@ describe('Node gateway and browser adapter contract', () => {
     } finally { await fixture.close(); }
   });
 
+  it('times out a silent upstream connection and keeps its reservation fenced', async () => {
+    let closed = false;
+    const fixture = await localGateway((req, res) => {
+      req.resume();
+      res.on('close', () => { closed = true; });
+    }, { timeoutMs: 100 });
+    try {
+      const provider = await GatewayStreamingProvider.connect(fixture.config.token, fixture.origin);
+      const scheduler = runtime(provider);
+      send(scheduler, 'provider never sends headers');
+      await expect.poll(() => scheduler.snapshot().budget.quarantinedSlots).toBe(1);
+      await expect.poll(() => closed).toBe(true);
+      expect(scheduler.requestMeasurements()[0]).toMatchObject({
+        outcome: 'failed', usage: 'unknown · held', unanswered: true,
+      });
+      expect(await provider.budget()).toMatchObject({ held: 1, quarantined: 1, provisionalNanoUsd: 0 });
+    } finally { await fixture.close(); }
+  });
+
   it('requires explicit enable and all safety caps', () => {
     expect(() => readConfig({})).toThrow('SS_ENABLE_REAL=YES');
     expect(() => readConfig({ SS_ENABLE_REAL: 'YES' })).toThrow('SS_GATEWAY_TOKEN');
