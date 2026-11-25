@@ -87,3 +87,9 @@ The following boundaries describe future integration points. Implement them as c
 | `ResourceReservation` | Hold allowed capacity for an operation and settle or release it exactly once. The ledger owns semantics for its resource kind. |
 
 Capture, retention, ownership, deadlines, cancellation, serialization and quota checks remain deterministic runtime decisions. A provider may score or recommend an action. It cannot grant permissions, set limits, directly send data, or publish a stale result. See the [inference orchestration design](inference-orchestration-design.md) for execution and output contracts.
+
+## Phase 4A integration
+
+The Live Vision Runtime Lab composes the Phase 3R sampling session with a separate inference session. Only an adaptive acceptance publishes thumbnail evidence to the inference boundary. Browser sources and historical lookup retain their Phase 3R ownership. Inference task snapshots own immutable serialized evidence, and output and physical settlement continue to be supervised separately after a sampling reset.
+
+[Phase 4A runtime architecture](phase4a-duplex-runtime.md)

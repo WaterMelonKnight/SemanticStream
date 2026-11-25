@@ -236,3 +236,9 @@ Recall measures only whether a frame was delivered inside a defined visual event
 Phase 2 does not implement a whole-video archive, GPU inference, model APIs, a backend, or a semantic understanding model. The buffer is a short-lived evidence cache, not a replacement for the source. The oracle result is not evidence of autonomous event discovery.
 
 Phase 3A does not deploy a model, download weights, call a paid API, or run on a GPU. The live task decision is advisory by default and can gate sends when the task-aware strategy is selected; the benchmark is the full execution proof for sends and retrieval actions. Task ROI is a declared user input, not a label. The decision heuristic can lose to the baselines; the held-out report shows both wins and misses. The live page only gates sends when the task-aware strategy is selected; retrieval actions remain benchmark-only. Later work may add opt-in sources, asynchronous sinks, a real adapter, calibrated probabilities, and broader resource policies.
+
+## Phase 4A · Duplex inference
+
+The independent Live Vision Runtime Lab connects Phase 3R's admitted evidence to a DOM-free inference scheduler. The browser retains source ownership. Overlapping requests use one scripted endpoint, immutable snapshots, one writer per output channel, and terminal-evidence-based release of physical capacity. Each visual source reset invalidates the inference session while preserving slots still in flight. The original visual comparison and its historical benchmarks remain available.
+
+See [Phase 4A runtime architecture](docs/phase4a-duplex-runtime.md) for task, output, usage and browser-source contracts.

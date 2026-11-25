@@ -50,9 +50,16 @@
 - Correct replay timing and spatial evidence coverage. Version the corrected outputs and preserve the original Phase 1B, 2 and 3A benchmarks.
 - Capture extension boundaries in [runtime architecture v2](docs/runtime-architecture-v2.md) and [inference orchestration](docs/inference-orchestration-design.md).
 
-## Phase 4A · Single-endpoint inference lifecycle
+## Phase 4A · Duplex inference and Live Vision Runtime Lab
 
-- Implement a Node-testable, bounded scheduler and output coordinator with one scripted fake streaming endpoint and two or more logical slots.
-- Dispatch each task against a frozen visual evidence snapshot with session, task and interaction provenance.
-- Verify overlapping requests, overload, deadline expiry, cancellation, stale partial suppression and provisional usage when a terminal receipt is absent.
-- Add a deterministic replay of this lifecycle. Defer real model adapters, heterogeneous pools, native bidirectional transport, and billing until the single-endpoint invariants hold.
+- Ship a bounded, Node-testable scheduler with a scripted streaming endpoint, FIFO and context-aware policies, dependencies, and one- and two-slot modes.
+- Freeze selected evidence per task, arbitrate streaming output per channel, and keep physical slots reserved through logical cancellation until upstream termination is confirmed.
+- Connect the Phase 3R sampling and retrieval pipeline to the independent Lab with a synthetic system monitor, procedural source, local files and an opt-in camera.
+- Replay identical simulated events under equivalent budgets. Publish per-event latencies, failures, stale suppression and usage accounting in [the Phase 4A report](benchmarks/results/phase4a-runtime.md).
+
+## Next · Real provider adapters
+
+- Add a server-side DeepSeek streaming adapter with attempt-scoped partials, reliable cancellation/terminal handling and usage receipts. Keep credentials outside the static frontend.
+- Add opt-in image transfer to a vision-capable model using bounded snapshots and distinct upload and provider budgets. Evaluate visual semantics separately from frame selection.
+- Optionally add TTS behind the output coordinator with bounded, interruptible playback.
+- Defer heterogeneous pools, GPU execution, native bidirectional model transport, distributed state and training until a real single-endpoint lifecycle is verified.

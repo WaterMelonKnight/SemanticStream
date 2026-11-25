@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <title>SemanticStream · Live Vision Runtime Lab</title>
+    <script type="module" src="/src/runtime-lab.ts"></script>
+  </head>
+  <body>
+    <header class="masthead">
+      <div><strong>SemanticStream</strong> <span>Phase 4A</span></div>
+      <a href="./index.html">Visual sampling demo ↗</a>
+    </header>
+    <main>
+      <header class="intro">
+        <p class="eyebrow">Local simulation</p>
+        <h1>Live Vision Runtime Lab</h1>
+        <p>Ingest visual evidence during generation. Compare scheduling with one or two slots on a single scripted endpoint.</p>
+      </header>
+      <div class="panel controls" aria-label="Runtime controls">
+        <label>Scheduler
+          <select id="mode">
+            <option value="aware">SemanticStream · 2 slots</option>
+            <option value="fifo">Concurrent FIFO · 2 slots</option>
+            <option value="serial">Serial FIFO · 1 slot</option>
+            <option value="aware-serial">SemanticStream · 1 slot</option>
+          </select>
+        </label>
+        <label>Mock behavior for new starts
+          <select id="behavior">
+            <option value="normal">Normal streaming</option>
+            <option value="ignore">Ignore cancel · unknown usage</option>
+            <option value="slow">Slow · deadline expiry</option>
+            <option value="error">Scripted error</option>
+          </select>
+        </label>
+        <div class="actions">
+          <button id="monitor">System monitor</button>
+          <button id="procedural">Procedural scene</button>
+          <button id="camera">Start camera</button>
+          <button id="stop-camera" hidden>Stop camera</button>
+          <label class="file">Local video <input id="video-file" type="file" accept="video/*" /></label>
+          <button id="video-playback" hidden>Play / pause video</button>
+        </div>
+        <p id="source-status" role="status"></p>
+        <video id="media" playsinline muted hidden></video>
+      </div>
+      <div class="capture-grid">
+        <section class="panel">
+          <div class="panel-heading"><h2>Original feed</h2><span id="capture-status"></span></div>
+          <canvas id="feed" width="720" height="405" role="img" aria-label="Original live visual input"></canvas>
+          <div class="actions scene-actions">
+            <button id="normal">Trigger ordinary change</button>
+            <button id="critical" class="danger">Trigger critical anomaly</button>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-heading"><h2>Agent evidence</h2><span id="agent-status">Awaiting dispatch</span></div>
+          <canvas id="agent" width="96" height="54" role="img" aria-label="Latest thumbnail received by the scripted provider"></canvas>
+          <p class="note">Monitor buttons supply known event metadata. Other sources provide pixel-change candidates. Visual semantic recognition is future work.</p>
+        </section>
+      </div>
+      <div class="details-grid">
+        <section class="panel inset">
+          <h2>Mock LLM output</h2>
+          <form id="turn">
+            <input id="prompt" aria-label="User text" maxlength="500" placeholder="Ask about the current feed…" required />
+            <button class="primary">Send</button>
+            <button type="button" id="interrupt">Interrupt</button>
+          </form>
+          <ul id="outputs" class="outputs"></ul>
+        </section>
+        <section class="panel inset">
+          <h2>Model slots &amp; queue</h2>
+          <div id="capacity"></div>
+          <ul id="tasks" class="log"></ul>
+          <h3>Resources</h3>
+          <ul id="budget" class="log"></ul>
+        </section>
+        <section class="panel inset">
+          <h2>Event &amp; scheduling timeline</h2>
+          <ul id="events" class="log"></ul>
+        </section>
+        <section class="panel inset">
+          <h2>Evidence history</h2>
+          <p id="cache" class="note"></p>
+          <form id="history">
+            <input id="sequence" aria-label="Frame sequence" type="number" min="1" required />
+            <button>Retrieve frame</button>
+          </form>
+          <p id="history-status" role="status"></p>
+          <canvas id="historical" width="96" height="54" role="img" aria-label="Retrieved historical thumbnail"></canvas>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>
