@@ -1,6 +1,6 @@
 # Architecture
 
-SemanticStream selects context from a live stream for an AI agent operating under limited bandwidth and compute. Phase 0 sampled a procedural visual stream and delivered selected frames to an in-browser mock agent. Phase 1A added a local video adapter that produces the same `StreamFrame<VisualFrame>` sequence. Phase 1B adds a deterministic, budget-aware event evaluation with global, local-block, and hybrid adaptive policies.
+SemanticStream selects context from a live stream for an AI agent operating under limited bandwidth and compute. Phase 0 sampled a procedural visual stream and delivered selected frames to an in-browser mock agent. Phase 1A added a local video adapter that produces the same `StreamFrame<VisualFrame>` sequence. Phase 1B adds a deterministic, budget-aware event evaluation with global, local-block, and hybrid adaptive policies. Phase 2 adds a bounded history buffer and an active retrieval protocol with separate and combined resource budgets.
 
 ## Runtime path
 
@@ -23,6 +23,9 @@ flowchart LR
   Adaptive --> Metrics
   FixedSink --> Agent[Selected Agent view]
   AdaptiveSink --> Agent
+  SourceCanvas --> Buffer[Bounded ContextBuffer]
+  Buffer --> Retrieval[ActiveRetrievalService]
+  Retrieval --> Agent
 ```
 
 Only one source is active. The procedural source draws its deterministic scene into the source Canvas. The video adapter draws the current video frame into the same Canvas, letterboxed to 720 × 405. Both call the same synchronous frame listener. Both samplers evaluate exactly the same capture sequence at runtime. Each has its own policy state, budget, metrics, rates, and mock sink. Selecting an agent view changes which sink and metrics row are visible.
@@ -41,7 +44,9 @@ Only one source is active. The procedural source draws its deterministic scene i
 | `VideoSource` | Owns the video element listeners, the local Object URL, frame-callback handles, and the `HTMLVideoElement` → Canvas capture path. `dispose()` releases all of them; `stop()` only pauses capture. |
 | `SamplingSession` | Owns both samplers, both mock sinks, the shared thumbnail reader, the adaptive strategy policy, the bounded decision timeline, and the rolling rate meters for one uninterrupted comparison session. |
 | `Benchmark replay` | A browser-independent Node/browser-neutral runner that feeds deterministic `ReplayFrame` samples into separately constructed samplers. Event labels are held outside the replay input. |
-| `ContextBuffer` | Reserved for Phase 2 bounded storage and explicit retrieval by sequence or time range. Phase 1B still has no raw-frame archive or retrieval interface. |
+| `ContextBuffer` | Session-scoped, bounded history of owned 96 × 54 RGBA copies. Enforces max age, max frames, and max bytes; supports latest, sequence, timestamp, range, and region lookups with explicit availability statuses. |
+| `ActiveRetrievalService` | Applies a retrieval budget and a combined real-time + retrieval budget, logs bounded request/response records, and returns typed results with session IDs, ranges, latency, and budget snapshots. |
+| `RollingResourceBudget` | Rolling frame/byte ledger used for retrieval-only and combined budgets. Recording a real-time send is explicit; retrieval cannot spend beyond either limit. |
 | `MetricsCollector` | Keeps cumulative counts, per-reason filtered counts, and mean processing latency in constant space for each strategy. |
 
 ## Online decisions and time
@@ -134,11 +139,62 @@ The tuning suite evaluates a small grid of local thresholds and block sizes for 
 
 The report includes per-scene results, aggregate results, parameter-selection evidence, observable misses, and unobservable events. The evaluation suite is held out; the latest results are committed as generated artifacts.
 
+## Bounded context buffer
+
+`ContextBuffer` is deliberately independent of the DOM and of the UI. It stores frame pixels, never Canvas references.
+
+- A session is identified by `sessionId`. Offering a frame from another session or querying with another session ID is rejected. The app creates a new buffer on video seek, load, restart, source switch, demo restart, and every new sampling session.
+- `offer` validates the RGBA dimensions and clones the caller's pixel array. Retrieval returns another clone, so a caller cannot mutate stored history.
+- Bounds are enforced in this order: age eviction (`timestamp < now − maxAgeMs`), frame-count eviction, then byte-count eviction. Each reason is counted separately.
+- The buffer tracks both the **retained range** and the **captured range**. A request can therefore be distinguished as `available`, `evicted`, `not-yet-captured`, `nonexistent`, or `wrong-session`; range requests can also be `partial` or `invalid-range`, and regions can be `region-invalid`.
+- Optional decimation is available, but the live demo and benchmark store every offered frame within the bounds. The live buffer is capped at 3 s / 90 frames / 3 MB; this is explicitly **not** a whole-video cache.
+- `dispose()` clears all pixel arrays and marks the buffer disposed. Page exit disposes the live buffer; a back-forward-cache restore keeps it because the page was not unloaded.
+
+The UI offers ownership-safe retrieval by clicking a decision-timeline column, using the frame's sequence. It shows the available range, cache bytes/frames, eviction reasons, request logs, and explicit error states.
+
+## Active retrieval protocol
+
+`ActiveRetrievalService` sits between the buffer and a mock agent:
+
+- `getLatestFrame(sessionId)`
+- `getFrameBySequence(sessionId, sequence)`
+- `getFrameAtTimestamp(sessionId, timestampMs, toleranceMs?)`
+- `getFramesBetween(sessionId, startMs, endMs, {maxFrames})`
+- `getRegion(sessionId, locator, {x, y, width, height})`
+
+Every response carries a request ID, session ID, method, status, requested time, measured latency, retained/captured ranges, and a budget snapshot. Frame and range responses include owned pixel copies; region responses include only the cropped pixels and source-frame metadata. Requests are recorded in a bounded log.
+
+The service owns two rolling budgets:
+
+- Retrieval: 6 frames and 2 MB per five seconds.
+- Combined real-time + retrieval: 26 frames and 4 MB per five seconds.
+
+The existing real-time sampler keeps its 20 frames / 5 s `BudgetController`. The app calls `recordRealtimeSend` for the selected agent's real-time deliveries. A retrieval is rejected with `budget-denied` if either the retrieval budget or the combined budget would be exceeded; a rejected request consumes no budget. The benchmark independently audits all three limits.
+
+The live page uses this protocol for timeline retrieval and a 24 × 16 region crop. It does not claim that the mock agent is a model.
+
+## Phase 2 benchmark
+
+The Phase 2 benchmark reuses the Phase 1B fixtures and the same 30 fps, 96 × 54 samples. It compares:
+
+- **A** fixed 4 fps.
+- **B** adaptive local.
+- **C** adaptive local plus cue retrieval.
+- **Oracle** adaptive local plus label-timed retrieval.
+
+C is the only candidate for autonomous behavior. Its cue is a real-time sampler decision of `budget`; it requests the latest buffered frame with a minimum spacing selected on the tuning suite. It never reads event labels or future frames.
+
+The oracle uses event midpoint labels to request a frame. It is an upper-bound experiment only, not autonomous discovery, and is marked as such in JSON, CSV, Markdown, and the page.
+
+The benchmark measures real-time recall, post-retrieval recall, missed events before/after, retrieval frame and byte counts, total sends/bytes, retrieval latency, cache peak, evictions and reasons, and real-time / retrieval / total budget violations. It focuses on the Phase 1B `eval-motion-text` failure where background motion exhausted the real-time budget. The generated artifacts are `benchmarks/results/phase2.json`, `.csv`, `.md`, and `public/benchmark/phase2.json`.
+
+Events entirely inside a capture gap remain unobservable. The oracle cannot recover them either. Retrieval can only return a frame that was captured and is still retained.
+
 ## Concurrency, ownership, and measurement
 
 Capture, thumbnail preparation, both decisions, and sink copies run synchronously on the browser main thread. There is no frame queue or catch-up work. A busy sink can decline a candidate via its return value. A slow synchronous sink delays the animation or video callback and can reduce the capture rate for both branches. Future asynchronous sinks will need explicit ownership transfer and a bounded overflow policy.
 
-A capture reuses the original source Canvas. The renderer, thumbnail Canvas, two mock-sink Canvases, the hidden video element, and a constant number of thumbnail samples are the retained media. The video element owns its decoder. `VideoSource` owns the Object URL and media listeners; the app owns the source and session lifetimes. The rolling budget keeps a bounded set of recent delivery timestamps. Stopping or restarting cancels the active callback. Restart or seek clears the sink views and drops the old samplers and their retained samples. Canvas and decoder storage are managed by the browser. The stream stops on page exit.
+A capture reuses the original source Canvas. The renderer, thumbnail Canvas, two mock-sink Canvases, the hidden video element, and a constant number of thumbnail samples are the retained media. The history buffer adds a bounded set of owned RGBA copies, never borrowed Canvas references. The video element owns its decoder. `VideoSource` owns the Object URL and media listeners; the app owns the source and session lifetimes. The rolling budget keeps a bounded set of recent delivery timestamps. Stopping or restarting cancels the active callback. Restart or seek clears the sink views and drops the old samplers and their retained samples. Canvas and decoder storage are managed by the browser. The stream stops on page exit.
 
 The reported mean processing latency includes the shared thumbnail preparation once per branch and that branch's synchronous decision and any accepted Canvas copy. It excludes scene or video rendering, the other branch's work, and UI updates. Input counts are captured frames each sampler evaluates; both samplers see the same sequence. Filtered share is (input − accepted) / input. It includes policy omissions, interval and budget blocks, and sink declines.
 
@@ -150,4 +206,4 @@ Low-area changes, brief text, and RGB changes attenuated by downsampling can fal
 
 Recall measures only whether a frame was delivered inside a defined visual event window. It does not measure whether a vision model or language model understood the event, and it does not measure task success. The synthetic fixtures are small, 96 × 54, and intentionally sparse. The event labels are evaluator-only; a real deployment would need an independent labeling and evaluation pipeline.
 
-Phase 1B does not implement raw-frame retrieval, active information request, GPU inference, model APIs, or a backend. Those belong to Phase 2 and later work.
+Phase 2 does not implement a whole-video archive, GPU inference, model APIs, a backend, or a semantic understanding model. The buffer is a short-lived evidence cache, not a replacement for the source. The oracle result is not evidence of autonomous event discovery. Later work may add opt-in sources, asynchronous sinks, and broader resource policies.

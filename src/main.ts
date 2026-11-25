@@ -1,12 +1,18 @@
 import './style.css';
 import { SamplingSession, TIMELINE_CAPACITY } from './app/sampling-session';
-import type { SamplingMode, SessionSnapshot } from './app/sampling-session';
+import type { SamplingMode, SessionSnapshot, TimelineEntry } from './app/sampling-session';
+import { ActiveRetrievalService } from './core/active-retrieval';
+import type { RetrievalResponse, RetrievalStats } from './core/active-retrieval';
+import { ContextBuffer } from './core/context-buffer';
+import type { BufferedFrame } from './core/context-buffer';
+import { SAMPLE_HEIGHT, SAMPLE_WIDTH } from './core/sample';
 import type { AdaptiveStrategy } from './core/local-change';
 import type { MetricsSnapshot } from './core/metrics';
 import type { StreamFrame } from './core/stream';
 import type { BenchmarkReport } from './benchmark/types';
-import { formatClock, formatRate } from './ui/format';
-import { drawDecisionTimeline } from './ui/timeline-view';
+import type { Phase2Report } from './benchmark/retrieval-types';
+import { formatBytes, formatClock, formatRate } from './ui/format';
+import { drawDecisionTimeline, timelineEntryIndexAt } from './ui/timeline-view';
 import type { FrameMetadata } from './visual/mock-agent';
 import { ProceduralSource } from './visual/source';
 import type { VisualFrame } from './visual/source';
@@ -15,6 +21,15 @@ import type { VideoResetReason, VideoSourceStatus } from './visual/video-source'
 
 const DISPLAY_INTERVAL_MS = 100;
 const REFRESH_INTERVAL_MS = 500;
+const LIVE_BUFFER_MAX_AGE_MS = 3_000;
+const LIVE_BUFFER_MAX_FRAMES = 90;
+const LIVE_BUFFER_MAX_BYTES = 3_000_000;
+const LIVE_RETRIEVAL_MAX_FRAMES = 6;
+const LIVE_RETRIEVAL_MAX_BYTES = 2_000_000;
+const LIVE_TOTAL_MAX_FRAMES = 26;
+const LIVE_TOTAL_MAX_BYTES = 4_000_000;
+const REGION_WIDTH = 24;
+const REGION_HEIGHT = 16;
 
 type SourceKind = 'demo' | 'video';
 
@@ -126,6 +141,19 @@ function runDemo(): void {
   const benchmarkBody = element<HTMLTableSectionElement>('benchmark-body');
   const benchmarkNote = element('benchmark-note');
   const benchmarkFailureNote = element('benchmark-failures');
+  const retrievalStatus = element('retrieval-status');
+  const historyRange = element('history-range');
+  const cacheUsage = element('cache-usage');
+  const cacheEvictions = element('cache-evictions');
+  const retrievalBudget = element('retrieval-budget');
+  const retrievedCanvas = element<HTMLCanvasElement>('retrieved-canvas');
+  const retrievedMeta = element('retrieved-meta');
+  const regionCanvas = element<HTMLCanvasElement>('region-canvas');
+  const regionMeta = element('region-meta');
+  const retrievalLogBody = element<HTMLTableSectionElement>('retrieval-log');
+  const phase2BenchmarkStatus = element('phase2-benchmark-status');
+  const phase2BenchmarkBody = element<HTMLTableSectionElement>('phase2-benchmark-body');
+  const phase2BenchmarkNote = element('phase2-benchmark-note');
 
   videoElement.muted = true;
   videoElement.playsInline = true;
@@ -139,6 +167,9 @@ function runDemo(): void {
   let lastVideoStatus: VideoSourceStatus | undefined;
   let videoWasPlaying = false;
   let refreshTimer: number | undefined;
+  let sessionCounter = 0;
+  let lastRetrievedFrame: BufferedFrame | null = null;
+  let lastRenderedRequestCount = -1;
 
   function currentAdaptiveStrategy(): AdaptiveStrategy {
     const value = adaptiveStrategySelect.value;
@@ -160,7 +191,35 @@ function runDemo(): void {
     });
   }
 
+  function createLiveRetrieval(): { buffer: ContextBuffer; service: ActiveRetrievalService } {
+    const sessionId = `live-${++sessionCounter}`;
+    const buffer = new ContextBuffer({
+      sessionId,
+      maxAgeMs: LIVE_BUFFER_MAX_AGE_MS,
+      maxFrames: LIVE_BUFFER_MAX_FRAMES,
+      maxBytes: LIVE_BUFFER_MAX_BYTES,
+    });
+    const service = new ActiveRetrievalService(buffer, {
+      sessionId,
+      retrieval: {
+        windowMs: 5_000,
+        maxFrames: LIVE_RETRIEVAL_MAX_FRAMES,
+        maxBytes: LIVE_RETRIEVAL_MAX_BYTES,
+      },
+      total: {
+        windowMs: 5_000,
+        maxFrames: LIVE_TOTAL_MAX_FRAMES,
+        maxBytes: LIVE_TOTAL_MAX_BYTES,
+      },
+      logCapacity: 40,
+    });
+    return { buffer, service };
+  }
+
   let session = createSession();
+  const initialLive = createLiveRetrieval();
+  let liveBuffer = initialLive.buffer;
+  let retrievalService = initialLive.service;
 
   function presentSentDelta(snapshot: SessionSnapshot): void {
     const { adaptive, fixed } = snapshot;
@@ -187,6 +246,157 @@ function runDemo(): void {
     presentSentDelta(snapshot);
     drawDecisionTimeline(timelineCanvas, target.timeline.toArray());
     timelineCount.textContent = `${target.timeline.size} / ${TIMELINE_CAPACITY} latest input frames kept`;
+    presentRetrieval();
+  }
+
+  function setRetrievalStatus(message: string, state: 'ok' | 'error' | 'idle' = 'idle'): void {
+    retrievalStatus.textContent = message;
+    retrievalStatus.dataset.state = state;
+  }
+
+  function clearCanvas(canvas: HTMLCanvasElement): void {
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function drawPixels(canvas: HTMLCanvasElement, pixels: Uint8ClampedArray, width: number, height: number): void {
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0);
+  }
+
+  function rangeText(range: { startMs: number; endMs: number } | null): string {
+    return range ? `${formatClock(range.startMs)}–${formatClock(range.endMs)}` : 'no retained range';
+  }
+
+  function clearRetrievalView(message = 'New session · buffer recording'): void {
+    lastRetrievedFrame = null;
+    lastRenderedRequestCount = -1;
+    clearCanvas(retrievedCanvas);
+    clearCanvas(regionCanvas);
+    retrievedMeta.textContent = 'Click a recent timeline column to request a buffered frame.';
+    regionMeta.textContent = 'Click the retrieved frame to crop a 24×16 pixel region.';
+    setRetrievalStatus(message, 'idle');
+  }
+
+  function presentRetrieval(): void {
+    const bufferStats = liveBuffer.stats();
+    const retrievalStats = retrievalService.stats();
+    historyRange.textContent = bufferStats.oldestTimestampMs === null
+      ? 'No cached frames'
+      : `${formatClock(bufferStats.oldestTimestampMs)}–${formatClock(bufferStats.latestTimestampMs)}`;
+    cacheUsage.textContent = `${formatBytes(bufferStats.byteCount)} / ${bufferStats.frameCount} frames`;
+    cacheEvictions.textContent = `${bufferStats.evictionCount} (age ${bufferStats.evictedByReason.age}, frames ${bufferStats.evictedByReason.frames}, bytes ${bufferStats.evictedByReason.bytes})`;
+    retrievalBudget.textContent = `${retrievalStats.budget.retrieval.usedFrames}/${retrievalStats.budget.retrieval.maxFrames} ret · `
+      + `${retrievalStats.budget.total.usedFrames}/${retrievalStats.budget.total.maxFrames} total`;
+    renderRetrievalLog(retrievalStats);
+  }
+
+  function renderRetrievalLog(stats: RetrievalStats): void {
+    if (stats.requests === lastRenderedRequestCount) return;
+    lastRenderedRequestCount = stats.requests;
+    retrievalLogBody.replaceChildren();
+    if (!stats.log.length) {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 6;
+      cell.textContent = 'No retrieval requests yet.';
+      row.append(cell);
+      retrievalLogBody.append(row);
+      return;
+    }
+    const methods: Record<string, string> = {
+      getLatestFrame: 'latest',
+      getFrameBySequence: 'sequence',
+      getFrameAtTimestamp: 'timestamp',
+      getFramesBetween: 'range',
+      getRegion: 'region',
+    };
+    for (const entry of [...stats.log].slice(-8).reverse()) {
+      const row = document.createElement('tr');
+      row.dataset.status = entry.status;
+      row.title = entry.message;
+      const cells = [
+        entry.requestId.replace('retrieval-', '#'),
+        methods[entry.method] ?? entry.method,
+        entry.status,
+        String(entry.frameCount),
+        formatBytes(entry.bytes),
+        entry.latencyMs.toFixed(2) + ' ms',
+      ];
+      for (const value of cells) {
+        const cell = document.createElement('td');
+        cell.textContent = value;
+        row.append(cell);
+      }
+      retrievalLogBody.append(row);
+    }
+  }
+
+  function applyFrameResponse(response: RetrievalResponse, entry: TimelineEntry): void {
+    if (response.status === 'available' && 'frame' in response && response.frame) {
+      lastRetrievedFrame = response.frame;
+      drawPixels(retrievedCanvas, response.frame.pixels, response.frame.width, response.frame.height);
+      const sent = entry.adaptive === 'sent' || entry.fixed === 'sent';
+      retrievedMeta.textContent = `Frame #${String(response.frame.sequence).padStart(4, '0')} · `
+        + `${response.frame.mediaTimeMs === null ? 't+' + (response.frame.timestampMs / 1_000).toFixed(2) + ' s' : 'media ' + formatClock(response.frame.mediaTimeMs)} · `
+        + `${formatBytes(response.bytes)} · ${sent ? 'already sent' : 'not sent by either sampler'}`;
+      clearCanvas(regionCanvas);
+      regionMeta.textContent = 'Click the retrieved frame to crop a 24×16 pixel region.';
+      setRetrievalStatus(`Retrieved frame #${response.frame.sequence}`, 'ok');
+      return;
+    }
+    lastRetrievedFrame = null;
+    clearCanvas(retrievedCanvas);
+    retrievedMeta.textContent = `${response.status}: ${response.message} · available ${rangeText(response.availableRange)}`;
+    clearCanvas(regionCanvas);
+    regionMeta.textContent = 'No source frame for a crop.';
+    setRetrievalStatus(`${response.status} · available ${rangeText(response.availableRange)}`, 'error');
+  }
+
+  function handleTimelineClick(event: MouseEvent): void {
+    const index = timelineEntryIndexAt(timelineCanvas, event.clientX);
+    if (index === null) return;
+    const entries = session.timeline.toArray();
+    const entry = entries[index];
+    if (!entry) return;
+    const response = retrievalService.getFrameBySequence(liveBuffer.sessionId, entry.sequence);
+    applyFrameResponse(response, entry);
+    presentRetrieval();
+  }
+
+  function handleRetrievedClick(event: MouseEvent): void {
+    if (!lastRetrievedFrame) {
+      setRetrievalStatus('Request a frame from the timeline first.', 'error');
+      return;
+    }
+    const frame = lastRetrievedFrame;
+    const rect = retrievedCanvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const pixelX = Math.floor(((event.clientX - rect.left) / rect.width) * frame.width);
+    const pixelY = Math.floor(((event.clientY - rect.top) / rect.height) * frame.height);
+    const width = Math.min(REGION_WIDTH, frame.width);
+    const height = Math.min(REGION_HEIGHT, frame.height);
+    const x = Math.max(0, Math.min(frame.width - width, pixelX - Math.floor(width / 2)));
+    const y = Math.max(0, Math.min(frame.height - height, pixelY - Math.floor(height / 2)));
+    const response = retrievalService.getRegion(
+      liveBuffer.sessionId,
+      { sequence: frame.sequence },
+      { x, y, width, height },
+    );
+    if (response.status === 'available' && response.image) {
+      drawPixels(regionCanvas, response.image.pixels, response.image.width, response.image.height);
+      regionMeta.textContent = `x ${x}, y ${y} · ${response.image.width}×${response.image.height} · ${formatBytes(response.bytes)} · ${response.latencyMs.toFixed(2)} ms`;
+      setRetrievalStatus(`Region crop from frame #${frame.sequence}`, 'ok');
+    } else {
+      clearCanvas(regionCanvas);
+      regionMeta.textContent = `${response.status}: ${response.message}`;
+      setRetrievalStatus(`Region request failed · ${response.status}`, 'error');
+    }
+    presentRetrieval();
   }
 
   function presentAgentFrame(): void {
@@ -206,8 +416,14 @@ function runDemo(): void {
   }
 
   function resetSession(): void {
+    retrievalService.dispose();
+    const live = createLiveRetrieval();
+    liveBuffer = live.buffer;
+    retrievalService = live.service;
+    retrievalService.setTotalFrameLimit(budget.valueAsNumber + LIVE_RETRIEVAL_MAX_FRAMES);
     session = createSession();
     lastDisplayAt = -Infinity;
+    clearRetrievalView();
     updateAgentView();
     presentSnapshot(session);
   }
@@ -331,8 +547,17 @@ function runDemo(): void {
   }
 
   function onFrame(frame: StreamFrame<VisualFrame>): void {
-    const decisions = session.process(frame);
+    const { decisions, sample } = session.process(frame);
     const { payload } = frame;
+    liveBuffer.offer({
+      sequence: frame.sequence,
+      timestampMs: frame.timestampMs,
+      mediaTimeMs: payload.mediaTimeMs,
+      width: SAMPLE_WIDTH,
+      height: SAMPLE_HEIGHT,
+      pixels: sample,
+      phase: payload.phase,
+    });
     if (sourcePhase.textContent !== payload.phase) sourcePhase.textContent = payload.phase;
     const metadata: FrameMetadata = {
       sequence: frame.sequence,
@@ -344,7 +569,10 @@ function runDemo(): void {
     };
     presentFrame(sourceSequence, sourceTime, metadata);
     sourceTimestamp.textContent = 't+' + (frame.timestampMs / 1_000).toFixed(2) + ' s';
-    if (decisions[mode] === 'sent') presentAgentFrame();
+    if (decisions[mode] === 'sent') {
+      presentAgentFrame();
+      retrievalService.recordRealtimeSend(frame.timestampMs, sample.byteLength);
+    }
 
     if (frame.timestampMs - lastDisplayAt >= DISPLAY_INTERVAL_MS) {
       lastDisplayAt = frame.timestampMs;
@@ -360,6 +588,7 @@ function runDemo(): void {
 
   function applyBudget(): void {
     session.setBudget(budget.valueAsNumber);
+    retrievalService.setTotalFrameLimit(budget.valueAsNumber + LIVE_RETRIEVAL_MAX_FRAMES);
     const frames = budget.value + (budget.valueAsNumber === 1 ? ' frame' : ' frames');
     budgetValue.value = frames + ' / 5 s';
     budget.setAttribute('aria-valuetext', frames + ' per 5 seconds');
@@ -401,6 +630,9 @@ function runDemo(): void {
   });
   restartButton.addEventListener('click', restartCurrent);
   useDemo.addEventListener('click', returnToDemo);
+
+  timelineCanvas.addEventListener('click', handleTimelineClick);
+  retrievedCanvas.addEventListener('click', handleRetrievedClick);
 
   chooseVideo.addEventListener('click', () => videoFile.click());
 
@@ -449,7 +681,10 @@ function runDemo(): void {
       videoSource.stop();
       if (!event.persisted) videoSource.dispose();
     }
-    if (!event.persisted && refreshTimer !== undefined) window.clearInterval(refreshTimer);
+    if (!event.persisted) {
+      retrievalService.dispose();
+      if (refreshTimer !== undefined) window.clearInterval(refreshTimer);
+    }
   });
 
   window.addEventListener('pageshow', (event) => {
@@ -528,6 +763,58 @@ function runDemo(): void {
     }
   }
 
+  function renderPhase2Benchmark(report: Phase2Report): void {
+    const evaluation = report.suites.evaluation;
+    const byStrategy = new Map(evaluation.aggregates.map((aggregate) => [aggregate.strategy, aggregate]));
+    phase2BenchmarkBody.replaceChildren();
+    for (const strategy of report.configuration.strategies) {
+      const aggregate = byStrategy.get(strategy.id);
+      if (!aggregate) continue;
+      const row = document.createElement('tr');
+      if (aggregate.oracle) row.dataset.strategy = 'oracle';
+      const labels = ['Strategy', 'Realtime recall', 'Post-retrieval', 'Retrieval frames', 'Total sent', 'Cache peak', 'Violations (rt/ret/total)'];
+      const values = [
+        strategy.label,
+        `${(100 * aggregate.realtimeRecall).toFixed(1)}% (${aggregate.realtimeCapturedEvents}/${aggregate.observableEvents})`,
+        `${(100 * aggregate.postRetrievalRecall).toFixed(1)}% (${aggregate.postCapturedEvents}/${aggregate.observableEvents})`,
+        `${aggregate.retrievalFrames} · ${formatBytes(aggregate.retrievalBytes)}`,
+        `${aggregate.totalSent} · ${formatBytes(aggregate.totalBytes)}`,
+        `${formatBytes(aggregate.peakCacheBytes)} / ${aggregate.peakCacheFrames} frames`,
+        `${aggregate.realtimeBudgetViolations}/${aggregate.retrievalBudgetViolations}/${aggregate.totalBudgetViolations}`,
+      ];
+      values.forEach((value, index) => {
+        const cell = index === 0 ? document.createElement('th') : document.createElement('td');
+        if (index === 0 && cell instanceof HTMLTableCellElement) cell.scope = 'row';
+        cell.dataset.label = labels[index];
+        cell.textContent = value;
+        row.append(cell);
+      });
+      phase2BenchmarkBody.append(row);
+    }
+    phase2BenchmarkStatus.textContent = `${evaluation.scenes.length} held-out scenes · cue ${report.cueSelection.intervalMs} ms`;
+    phase2BenchmarkNote.textContent = `C uses real-time budget-denial cues only. The oracle row uses event labels, is an upper bound, not autonomous discovery, and bypasses the production retrieval budget. `
+      + `Cache peak and evictions are measured over the same replay.`;
+  }
+
+  async function loadPhase2Benchmark(): Promise<void> {
+    try {
+      const response = await fetch(import.meta.env.BASE_URL + 'benchmark/phase2.json', { cache: 'no-cache' });
+      if (!response.ok) throw new Error(`Phase 2 benchmark request returned ${response.status}.`);
+      renderPhase2Benchmark(await response.json() as Phase2Report);
+    } catch (error) {
+      phase2BenchmarkStatus.textContent = 'Unavailable';
+      phase2BenchmarkBody.replaceChildren();
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 7;
+      cell.textContent = 'Phase 2 benchmark results are not available. Run npm run benchmark.';
+      row.append(cell);
+      phase2BenchmarkBody.append(row);
+      phase2BenchmarkNote.textContent = 'The live retrieval demo still works; benchmark data is a generated static artifact.';
+      console.error('Could not load Phase 2 benchmark results.', error);
+    }
+  }
+
   applyThreshold();
   applyBudget();
   applyLocalThreshold();
@@ -544,6 +831,7 @@ function runDemo(): void {
   }, REFRESH_INTERVAL_MS);
 
   void loadBenchmark();
+  void loadPhase2Benchmark();
 }
 
 try {

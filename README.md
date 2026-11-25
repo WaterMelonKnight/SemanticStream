@@ -2,9 +2,7 @@
 
 **Less data. More understanding.**
 
-SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. The project aims to let agents explicitly retrieve original context when needed.
-
-Phase 0 built a browser-only visual loop with a procedural Canvas source and a mock receiver. Phase 1A added local video input. Phase 1B adds a deterministic, budget-aware event evaluation: configurable local block change detection, a global/local hybrid policy, labeled replay scenes, and real JSON/CSV/Markdown benchmark output.
+SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 adds a bounded history buffer and active retrieval, so an agent can ask for visual evidence that was not sent in real time.
 
 Everything runs locally in the browser or in Node.js. The selected video is read through a local Object URL and drawn to Canvas; no video or frame is uploaded. The project requires no GPU, backend, database, model API, or paid service.
 
@@ -17,87 +15,94 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. The app starts on the procedural demo. The **Adaptive strategy** selector switches the adaptive branch between:
+The live demo compares a fixed sampler with a configurable adaptive sampler:
 
 - **Global RGB** — the Phase 0 `meanRgbDifference` baseline.
 - **Local blocks** — a configurable block-local detector.
 - **Hybrid** — global change OR local blocked change.
 
-The local detector uses the shared 96 × 54 RGBA thumbnail. Its block size (6, 8, or 12 px), threshold, and minimum changed-block count are configurable. The local and hybrid rules are still policies inside the existing `Sampler`; they do not bypass the 125 ms minimum interval, the 1.5 s silence refresh, or the rolling five-second frame budget.
+Both branches use 125 ms minimum delivery spacing, a 1.5 s silence refresh, and the configured rolling five-second frame cap. The selected agent's real-time deliveries are also recorded in a combined resource ledger.
 
-Changing the adaptive strategy keeps both samplers and their histories. The next frame uses the new rule.
+## Bounded context buffer
 
-## Visual input
+Each sampling session owns a bounded, local history of frames that were actually captured. It is not a video cache.
 
-Choose **Choose local video** and pick an MP4 or WebM the browser can decode. The file picker is local; the app never sends the file anywhere.
+- Default live bounds: **3 s**, **90 frames**, **3 MB**.
+- Frames are stored as owned 96 × 54 RGBA copies. The buffer never retains a Canvas that a later frame can overwrite, and every lookup returns another copy.
+- Eviction happens by age, frame count, and byte count, in that order. The UI and report show the eviction count and the reason breakdown.
+- Video seek, restart, file switch, source switch, demo restart, and a new sampling session dispose the old buffer and create a new session ID.
+- Page exit disposes the buffer. A back-forward-cache restore keeps the session because the page was not unloaded.
+- Cross-session requests return `wrong-session`; they never leak frames from another session.
 
-- **Play / Pause** stops and resumes capture without resetting the comparison session.
-- **Restart** seeks to the start and resets the sampling session.
-- **Seek** resets the sampling session because media time is discontinuous. A seek to the current position also resets.
-- **Choose local video** while a video is active switches files, revokes the previous Object URL, and resets the session.
-- **Built-in demo** disposes the video adapter, releases its Object URL, and returns to the procedural scene.
+The buffer can answer:
 
-Video frames are captured with `requestVideoFrameCallback` when available, with a `requestAnimationFrame` fallback that only emits when media time changes. Sampling timestamps are monotonic `performance.now()` values inside a session; video media time is displayed separately. A backward media-time jump never reaches the sampler because load/seek/restart begin a new session.
-
-Codec support varies by browser. MP4 with H.264/AAC and WebM with VP8/VP9 are the most likely choices. The app checks `canPlayType` before loading and reports media decode errors with an actionable message. iPhone Safari may require a tap on **Play** even though the video is muted.
-
-## Live dashboard
-
-The dashboard reports cumulative inputs, deliveries, filtered share, mean browser processing latency, and rolling input/sent rates for both branches. A separate line shows whether adaptive or fixed delivered more frames from the same input sequence.
-
-Filtered frames are broken down by reason:
-
-- **Policy** — the strategy decided not to send.
-- **Interval** — the 125 ms minimum spacing blocked it.
-- **Budget** — the rolling five-second cap was full.
-- **Busy** — the mock sink declined a frame (backpressure).
-
-The timeline keeps only the latest 150 input-frame decisions. Each column is one shared input frame; the top lane is adaptive and the bottom lane is fixed. The rate meters keep a two-second window.
-
-Frame counts are frame counts. They are not model tokens, API calls, or money. Brief or small visual events can still be missed by capture, sampling, the budget, or a busy sink.
-
-## Budget-aware benchmark
-
-The benchmark replays deterministic fixtures, not a hand-written example:
-
-- 96 × 54 RGBA samples at 30 fps.
-- Six tuning scenes and six held-out evaluation scenes.
-- Labeled local text, 100 ms brief events, low-contrast changes, slow brightness ramps, irrelevant background motion, and capture pauses.
-- Identical frames, timestamps, budget window, frame limit, minimum interval, and silence refresh for every strategy.
-- Event labels and regions are consumed only by the evaluator after replay. Policies see only the current sample and their own prior accepted sample.
-
-Recall means **at least one delivered frame timestamp falls inside the event's labeled window**. It does not mean a vision or language model understood the event. Events entirely inside a capture gap are reported separately and excluded from recall. A send outside a labeled event is a diagnostic, not automatically a false positive, because the event set is intentionally sparse.
-
-Run:
-
-```sh
-npm run benchmark
+```text
+getLatestFrame(sessionId)
+getFrameBySequence(sessionId, sequence)
+getFrameAtTimestamp(sessionId, timestampMs, toleranceMs?)
+getFramesBetween(sessionId, startMs, endMs, { maxFrames })
+getRegion(sessionId, {sequence} | {timestampMs}, {x, y, width, height})
 ```
 
-This writes:
+Results distinguish `available`, `partial`, `evicted`, `not-yet-captured`, `nonexistent`, `wrong-session`, `invalid-range`, `region-invalid`, `budget-denied`, and `disposed`. Every response carries the session ID, requested timestamp, latency, available range, captured range, and budget snapshot.
 
-- `benchmarks/results/latest.json` — full machine-readable report.
-- `benchmarks/results/latest.csv` — one row per scene/strategy plus suite aggregates.
-- `benchmarks/results/latest.md` — readable report with parameter selection, per-scene results, misses, and unobservable events.
-- `public/benchmark/latest.json` — the same JSON used by the in-page benchmark panel.
+### Retrieval budget
 
-The latest held-out evaluation, with 9 observable events out of 10 labeled events:
+Retrieval has its own rolling budget and shares a combined ledger with real-time sends:
 
-| Strategy | Sent | Recall | Missed | Mean first capture | Budget violations |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Fixed · 4 fps | 139 | 88.9% (8/9) | 1 | 120.8 ms | 0 |
-| Adaptive · global RGB | 45 | 33.3% (3/9) | 6 | 166.7 ms | 0 |
-| Adaptive · local blocks | 53 | 88.9% (8/9) | 1 | 4.2 ms | 0 |
-| Adaptive · hybrid | 56 | 88.9% (8/9) | 1 | 4.2 ms | 0 |
+- Retrieval: **6 frames and 2 MB / 5 s**.
+- Combined real-time + retrieval: **26 frames and 4 MB / 5 s**.
+- Real-time sampler: the existing **20 frames / 5 s** cap.
 
-The new local/hybrid rules are **not uniformly better**:
+The live UI records the selected agent's real-time deliveries. A retrieval request is rejected before data leaves the buffer when either the retrieval budget or the combined budget is exhausted. The benchmark independently audits all three limits.
 
-- Fixed also reaches 8/9 and misses only one 100 ms event that falls between its 250 ms slots.
-- Global misses six local/low-contrast events.
-- Local and hybrid reach 8/9 with fewer sends, but both miss the event that follows the irrelevant background motion: the motion consumes the rolling 20-frame budget first.
-- Hybrid adds three sends over local on the slow-ramp scene without improving recall.
+## Live retrieval demo
 
-These are real replay results. Parameter selection uses only the tuning suite; the evaluation suite is held out. Processing time is wall-clock time and varies between runs; the frame decisions and input sequences are deterministic.
+The page adds:
+
+- Available history range, cache memory, frame count, evictions, and retrieval-budget usage.
+- A bounded request/response log.
+- Click a recent decision-timeline column to retrieve that buffered frame, including frames neither sampler sent.
+- Click the retrieved frame to request a 24 × 16 local pixel crop.
+- Explicit messages for evicted frames, budget denials, capture-gap requests, and session resets.
+
+This is a mock agent. It does not call a model or MCP service.
+
+## Deterministic benchmark
+
+`npm run benchmark` runs both the Phase 1B event benchmark and the Phase 2 retrieval benchmark. The retrieval benchmark reuses the same deterministic 30 fps, 96 × 54 replay fixtures and the same real-time sampler.
+
+It compares:
+
+- **A · Fixed 4 fps**
+- **B · Adaptive local**
+- **C · Adaptive local + cue retrieval**
+- **Oracle · local + label-timed retrieval** (upper bound only)
+
+C's only cue is a real system signal: the real-time sampler returned `budget`. It requests the latest buffered frame with a 500 ms minimum spacing. It does not read event labels. The 500 ms value is selected on the tuning suite.
+
+The oracle requests a frame at the midpoint of each labeled event. It exists only to estimate the best case under label-perfect triggering. It also bypasses the production retrieval budget because it is not a deployable strategy. **It is not autonomous discovery.**
+
+### Held-out evaluation
+
+9 observable events out of 10; one event is inside a capture gap.
+
+| Strategy | Realtime recall | Post-retrieval recall | Retrieval frames | Total sent | Cache peak | Violations (rt / ret / total) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| A · Fixed 4 fps | 88.9% (8/9) | 88.9% (8/9) | 0 | 139 | 1.87 MB / 90 | 0 / 0 / 0 |
+| B · Adaptive local | 88.9% (8/9) | 88.9% (8/9) | 0 | 53 | 1.87 MB / 90 | 0 / 0 / 0 |
+| C · Local + cue retrieval | 88.9% (8/9) | 100.0% (9/9) | 5 | 58 | 1.87 MB / 90 | 0 / 0 / 0 |
+| Oracle · label-timed | 88.9% (8/9) | 100.0% (9/9) | 9 | 62 | 1.87 MB / 90 | 0 / 0 / 0 |
+
+The key Phase 1B failure was `eval-motion-text`: irrelevant background motion exhausted the 20-frame budget, so the local policy missed the event. The cue strategy recovers it from 0% to 100% with 5 retrieval frames. The oracle recovers the same event with 1 retrieval frame. This demonstrates the value of a bounded buffer, not autonomous semantic understanding.
+
+Results are written to:
+
+- `benchmarks/results/latest.json`, `latest.csv`, `latest.md` — Phase 1B.
+- `benchmarks/results/phase2.json`, `phase2.csv`, `phase2.md` — Phase 2.
+- `public/benchmark/latest.json` and `public/benchmark/phase2.json` — used by the page.
+
+Recall means a delivered or retrieved frame timestamp falls inside a labeled event window. It does not measure whether a model understood the event. Uncaptured events cannot be recovered. The buffer is short-lived; frames evicted before a request are returned as `evicted`.
 
 ## Verify and build
 
@@ -109,22 +114,27 @@ npm run build
 npm run preview
 ```
 
-Tests cover the sampler, budget, global change detector, block-local detector, strategy switching, event evaluation, tuning/evaluation separation, deterministic fixtures, duplicate-frame suppression, video switching, pause/resume, seek reset, Object URL release, listener cleanup, and the bounded timeline. The Phase 0 procedural tests remain in the suite.
+Tests cover:
 
-GitHub Actions runs install, typecheck, tests, the benchmark CLI, and the static build for branch pushes and pull requests. For Cloudflare Pages, use the repository root, `npm run build` as the build command, and `dist` as the build output directory. Set `NODE_VERSION` to `24` for preview and production builds. The application uses static files and requires no Cloudflare bindings.
+- Buffer time/byte/frame limits, ownership copies, eviction reasons, lookup statuses, ranges, regions, disposal, and cross-session isolation.
+- Retrieval budget, combined budget, denial, request logs, regions, wrong-session, and disposal.
+- Phase 2 cue replay, cache bounds, background-motion recovery, event-label isolation for cue decisions, deterministic digests, and report generation.
+- Existing sampler, video lifecycle, Phase 1B fixtures/benchmark, timeline, rate, and formatting tests.
+
+GitHub Actions runs install, typecheck, all tests, both benchmarks, and the static build. For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. No Cloudflare bindings are required.
 
 ### Browser checklist
 
-During development, the built page was exercised in headless Chromium with a generated local WebM and the benchmark panel. CI does not install a browser. Before a release, also check on real devices:
+The built page was exercised in headless Chromium with a 390 px viewport: timeline click retrieval, region crop, eviction error, retrieval budget denial, both benchmark panels, and no horizontal overflow. CI does not install a browser. Before a release, also check on real devices:
 
-1. iPhone Safari: choose a camera-roll MP4, confirm the first frame appears, tap **Play**, then pause, seek, and return to the demo.
-2. Android Chrome: choose a downloaded WebM and an MP4, switch files while playing, and confirm the previous Object URL is released (no stale playback).
-3. Background the tab during playback, return, and confirm capture resumes without a burst of catch-up frames.
-4. Rotate a narrow phone and check that the input controls, metrics, timeline, and benchmark cards do not overflow horizontally.
+1. iPhone Safari: select a camera-roll MP4, play/pause/seek, click a recent timeline column, and crop a region.
+2. Android Chrome: switch video files while playing, then retrieve a frame from the new session; confirm the old session is rejected as `wrong-session`.
+3. Background/restore the tab and confirm capture and the bounded buffer resume without a burst.
+4. Rotate a narrow phone and check the timeline, retrieval panel, log, and benchmark cards.
 
 ## Documentation
 
-Read [ARCHITECTURE.md](ARCHITECTURE.md) for contracts, timing, video lifecycle, local/hybrid policies, benchmark isolation, and ownership; [ROADMAP.md](ROADMAP.md) for follow-up work; and [AGENTS.md](AGENTS.md) for coding-agent handoff.
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for contracts, bounded buffer semantics, budgets, retrieval statuses, benchmark isolation, and ownership; [ROADMAP.md](ROADMAP.md) for phase status; and [AGENTS.md](AGENTS.md) for coding-agent handoff.
 
 ## License
 

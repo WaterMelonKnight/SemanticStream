@@ -13,7 +13,8 @@
     "test": "vitest run",
     "build": "vite build",
     "preview": "vite preview",
-    "benchmark": "tsx src/benchmark/cli.ts"
+    "benchmark": "tsx src/benchmark/cli.ts && tsx src/benchmark/retrieval-cli.ts",
+    "benchmark:phase2": "tsx src/benchmark/retrieval-cli.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.7",

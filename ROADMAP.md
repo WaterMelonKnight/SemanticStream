@@ -24,14 +24,16 @@
 
 ## Phase 2 · Bounded Context Buffer and Active Retrieval
 
-1. Add a bounded raw-frame buffer with age and byte limits, explicit frame ownership, and eviction.
-2. Support retrieval by time range or sequence, including unavailable ranges and eviction reasons.
-3. Let the agent request omitted context actively instead of relying only on the live sampler.
-4. Evaluate retrieval recall and latency against the Phase 1B event labels and budget.
-5. Keep the buffer local and bounded; no backend or model API is required for the core path.
+- Add a session-scoped `ContextBuffer` capped by age, bytes, and frame count, with owned RGBA copies and explicit eviction reasons.
+- Support latest, sequence, timestamp, range, and region retrieval with explicit available/evicted/not-yet-captured/nonexistent/wrong-session statuses.
+- Reset and dispose the buffer on video seek/load/restart, source switch, demo restart, and page exit; keep sessions isolated.
+- Add a retrieval budget and a combined real-time + retrieval ledger so active retrieval cannot bypass the real-time cap.
+- Add a live mock-agent demo with history range, cache usage, request log, timeline retrieval, region crop, and failure messages.
+- Extend the deterministic replay benchmark to compare fixed, adaptive local, adaptive local + cue retrieval, and a clearly labeled label-timed oracle upper bound.
+- Measure real-time and post-retrieval recall, retrieval frames/bytes/latency, cache peak, evictions, total sends, and budget violations; focus on the Phase 1B background-motion miss.
 
-## Later · Sources and sinks
+## Next
 
-- Add opt-in browser visual sources beyond local files, with explicit permission handling.
+- Add opt-in visual sources beyond local files, with explicit permission handling.
 - Evaluate asynchronous sinks, tighter resource budgets, and bounded delivery under backpressure.
-- Validate the existing abstractions against a concrete log, audio, or sensor source before generalizing them.
+- Validate the abstractions against a concrete log, audio, or sensor source before generalizing them.

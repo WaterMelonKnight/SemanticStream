@@ -51,6 +51,11 @@ export interface SessionSnapshot {
 
 export type SessionDecisions = Readonly<Record<SamplingMode, FrameDecision>>;
 
+export interface SessionProcessResult {
+  readonly decisions: SessionDecisions;
+  readonly sample: PixelSample;
+}
+
 /**
  * One comparison session owns both samplers, both sink views, and bounded
  * diagnostics. A new session is created after a source switch or seek.
@@ -98,7 +103,7 @@ export class SamplingSession {
     };
   }
 
-  process(frame: StreamFrame<VisualFrame>): SessionDecisions {
+  process(frame: StreamFrame<VisualFrame>): SessionProcessResult {
     const pixels = this.thumbnail.read(frame.payload.canvas);
     const preparationMs = Math.max(0, this.now() - frame.timestampMs);
     const adaptive = this.samplers.adaptive.process(frame, pixels, preparationMs);
@@ -114,7 +119,7 @@ export class SamplingSession {
       adaptive,
       fixed,
     });
-    return { adaptive, fixed };
+    return { decisions: { adaptive, fixed }, sample: pixels };
   }
 
   get adaptiveStrategy(): AdaptiveStrategy {
