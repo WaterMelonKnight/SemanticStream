@@ -1,8 +1,10 @@
 import type { DecisionAction } from '../decision/types';
 import type { Phase2SceneResult } from './retrieval-types';
+import { intersection } from './evidence';
+import type { EvidenceTiming } from './evidence';
 import type { BenchmarkScene, SceneSuite } from './types';
 
-export const PHASE3_SCHEMA_VERSION = 3;
+export const PHASE3_SCHEMA_VERSION = 4;
 
 export type TaskStrategyId = 'fixed' | 'local' | 'local-retrieval' | 'task-aware';
 
@@ -48,6 +50,8 @@ export interface TaskSceneResult {
   readonly roiMissedAfter: number;
   readonly realtimeFirstCaptureLatencyMs: number | null;
   readonly postFirstCaptureLatencyMs: number | null;
+  readonly evidenceTiming: EvidenceTiming;
+  readonly retrievalAvailable: number;
   readonly retrievalRequests: number;
   readonly retrievalDenied: number;
   readonly retrievalLatencyMeanMs: number | null;
@@ -89,6 +93,8 @@ export interface TaskAggregate {
   readonly roiPostRetrievalRecall: number;
   readonly missedBefore: number;
   readonly missedAfter: number;
+  readonly evidenceTiming: EvidenceTiming;
+  readonly retrievalAvailable: number;
   readonly retrievalRequests: number;
   readonly retrievalDenied: number;
   readonly retrievalLatencyMeanMs: number | null;
@@ -121,7 +127,7 @@ export interface TaskSuiteResult {
 
 export interface TaskReport {
   readonly schemaVersion: number;
-  readonly phase: '3A';
+  readonly phase: '3A-corrected';
   readonly configuration: {
     readonly sampleWidth: number;
     readonly sampleHeight: number;
@@ -176,7 +182,7 @@ export function taskResultFromPhase2(
   const observable = scene.events.filter((event) =>
     scene.frames.some((frame) => frame.timestampMs >= event.startMs && frame.timestampMs < event.endMs));
   const roiEvents = task.roi
-    ? observable.filter((event) => intersects(event.region, task.roi!))
+    ? observable.filter((event) => intersection(event.region, task.roi!) !== null)
     : [];
   const missedBefore = new Set(result.missedBeforeIds);
   const missedAfter = new Set(result.missedAfterIds);
@@ -213,6 +219,8 @@ export function taskResultFromPhase2(
     roiMissedAfter: roiEvents.length - roiCapturedAfter.length,
     realtimeFirstCaptureLatencyMs: result.realtimeFirstCaptureLatencyMs,
     postFirstCaptureLatencyMs: result.postFirstCaptureLatencyMs,
+    evidenceTiming: result.evidenceTiming,
+    retrievalAvailable: result.retrievalAvailable,
     retrievalRequests: result.retrievalRequests,
     retrievalDenied: result.retrievalDenied,
     retrievalLatencyMeanMs: result.retrievalLatencyMeanMs,
@@ -231,14 +239,4 @@ export function taskResultFromPhase2(
     missedAfterIds: result.missedAfterIds,
     decisionDigest: result.decisionDigest,
   };
-}
-
-function intersects(
-  region: { x: number; y: number; width: number; height: number },
-  roi: { x: number; y: number; width: number; height: number },
-): boolean {
-  return region.x < roi.x + roi.width
-    && region.x + region.width > roi.x
-    && region.y < roi.y + roi.height
-    && region.y + region.height > roi.y;
 }

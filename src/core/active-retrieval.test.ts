@@ -64,7 +64,7 @@ describe('active retrieval protocol', () => {
 
   it('enforces a retrieval budget and includes real-time sends in the total budget', () => {
     const { service } = setup();
-    service.recordRealtimeSend(0, BYTES);
+    service.admission.reserveRealtime(0, BYTES)?.commit(0);
     expect(service.getLatestFrame('session-a').status).toBe('available');
     expect(service.getLatestFrame('session-a').status).toBe('available');
 
@@ -136,4 +136,18 @@ describe('active retrieval protocol', () => {
     expect(buffer.stats().disposed).toBe(true);
     expect(service.stats().log).toHaveLength(0);
   });
+});
+
+it('settles a historical delivery at completion and returns its committed usage', () => {
+  const buffer = new ContextBuffer({ sessionId: 'session-a', maxAgeMs: 10_000, maxBytes: 10_000, maxFrames: 3 });
+  buffer.offer(frame(1, 10));
+  const times = [4_990, 5_001];
+  const service = new ActiveRetrievalService(buffer, config(), () => times.shift()!);
+  const response = service.getLatestFrame('session-a');
+  expect(response).toMatchObject({
+    requestedAtMs: 4_990, completedAtMs: 5_001, deliveredAtMs: 5_001, latencyMs: 11,
+    frame: { timestampMs: 10 }, budget: { retrieval: { usedFrames: 1 } },
+  });
+  expect(service.admission.snapshot(10_000).total.usedFrames).toBe(1);
+  expect(service.admission.snapshot(10_001).total.usedFrames).toBe(0);
 });

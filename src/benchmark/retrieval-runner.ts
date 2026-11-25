@@ -1,11 +1,12 @@
 import { ActiveRetrievalService } from '../core/active-retrieval';
-import { BudgetController } from '../core/budget';
 import { ContextBuffer } from '../core/context-buffer';
 import type { FrameDecision } from '../core/metrics';
 import { SAMPLE_HEIGHT, SAMPLE_WIDTH } from '../core/sample';
 import type { PixelSample } from '../core/sampling';
 import { Sampler } from '../core/sampler';
 import type { StreamFrame } from '../core/stream';
+import { aggregateEvidenceTiming, countResourceViolations, evaluateEvidence } from './evidence';
+import type { EvidenceDelivery } from './evidence';
 import { getScenes } from './fixtures';
 import {
   BENCHMARK_DEFAULT_LOCAL,
@@ -13,8 +14,6 @@ import {
   BENCHMARK_TIMING,
   BENCHMARK_BUDGET_WINDOW_MS,
   createPolicy,
-  countBudgetViolations,
-  evaluateScene,
 } from './runner';
 import { BENCHMARK_FRAME_RATE } from './types';
 import type { BenchmarkScene } from './types';
@@ -53,20 +52,6 @@ export const PHASE2_STRATEGIES: readonly Phase2Strategy[] = [
   { id: 'local-oracle-retrieval', label: 'Oracle · local + label-timed retrieval', oracle: true, cue: 'event midpoint labels; upper bound only' },
 ];
 
-interface Delivery {
-  readonly sequence: number;
-  readonly timestampMs: number;
-}
-
-interface RetrievalDelivery extends Delivery {
-  readonly bytes: number;
-  readonly latencyMs: number;
-}
-
-interface ResourceEvent extends Delivery {
-  readonly bytes: number;
-}
-
 function hashString(value: string): string {
   let hash = 2_166_136_261;
   for (let index = 0; index < value.length; index += 1) {
@@ -82,15 +67,15 @@ function inputDigest(scene: BenchmarkScene): string {
 
 function decisionDigest(
   decisions: readonly FrameDecision[],
-  realtime: readonly Delivery[],
-  retrieval: readonly RetrievalDelivery[],
+  realtime: readonly EvidenceDelivery[],
+  retrieval: readonly EvidenceDelivery[],
 ): string {
   return hashString(
     decisions.join('')
     + '|'
-    + realtime.map((delivery) => `${delivery.sequence}@${delivery.timestampMs}`).join(',')
+    + realtime.map((delivery) => `${delivery.sequence}@${delivery.capturedAtMs}`).join(',')
     + '|'
-    + retrieval.map((delivery) => `${delivery.sequence}@${delivery.timestampMs}:${delivery.bytes}`).join(','),
+    + retrieval.map((delivery) => `${delivery.sequence}@${delivery.capturedAtMs}:${delivery.deliveredAtMs}:${delivery.bytes}`).join(','),
   );
 }
 
@@ -106,24 +91,6 @@ function percentile(values: readonly number[], fraction: number): number {
 
 function inAnyEvent(timestampMs: number, scene: BenchmarkScene): boolean {
   return scene.events.some((event) => timestampMs >= event.startMs && timestampMs < event.endMs);
-}
-
-function countResourceViolations(
-  events: readonly ResourceEvent[],
-  maxFrames: number,
-  maxBytes: number,
-  windowMs: number,
-): number {
-  const recent: ResourceEvent[] = [];
-  let violations = 0;
-  for (const event of [...events].sort((left, right) => left.timestampMs - right.timestampMs)) {
-    while (recent.length && event.timestampMs >= recent[0].timestampMs + windowMs) recent.shift();
-    const frames = recent.length;
-    const bytes = recent.reduce((total, entry) => total + entry.bytes, 0);
-    if (frames + 1 > maxFrames || bytes + event.bytes > maxBytes) violations += 1;
-    recent.push(event);
-  }
-  return violations;
 }
 
 function retrievalLatencyStats(latencies: readonly number[]): {
@@ -186,18 +153,17 @@ export function runPhase2StrategyOnScene(
   );
   const sampler = new Sampler<null, PixelSample>(
     createPolicy(strategyPolicy(strategy), BENCHMARK_DEFAULT_LOCAL),
-    new BudgetController(BENCHMARK_BUDGET_WINDOW_MS, BENCHMARK_FRAME_LIMIT),
+    service.admission,
     BENCHMARK_TIMING,
     { accept: () => true },
     undefined,
-    service.admission,
     PHASE2_SAMPLE_BYTES,
+    () => replayClock.now,
   );
 
-  const realtimeDeliveries: Delivery[] = [];
-  const retrievalDeliveries: RetrievalDelivery[] = [];
+  const realtimeDeliveries: EvidenceDelivery[] = [];
+  const retrievalDeliveries: EvidenceDelivery[] = [];
   const decisions: FrameDecision[] = [];
-  const processingMs: number[] = [];
   const retrievalLatencies: number[] = [];
   let realtimeBytes = 0;
   let retrievalBytes = 0;
@@ -232,13 +198,14 @@ export function runPhase2StrategyOnScene(
       timestampMs: replayFrame.timestampMs,
       payload: null,
     };
-    const startedAt = performance.now();
     const decision = sampler.process(frame, replayFrame.sample, 0);
-    processingMs.push(performance.now() - startedAt);
     decisions.push(decision);
 
     if (decision === 'sent') {
-      realtimeDeliveries.push({ sequence: replayFrame.sequence, timestampMs: replayFrame.timestampMs });
+      realtimeDeliveries.push({
+        sequence: replayFrame.sequence, capturedAtMs: replayFrame.timestampMs,
+        deliveredAtMs: sampler.lastDeliveredAtMs!, bytes: PHASE2_SAMPLE_BYTES,
+      });
       realtimeBytes += PHASE2_SAMPLE_BYTES;
     }
 
@@ -248,12 +215,12 @@ export function runPhase2StrategyOnScene(
       const requestStarted = performance.now();
       const response = service.getLatestFrame(sessionId);
       retrievalLatencies.push(performance.now() - requestStarted);
-      if (response.status === 'available' && response.frame) {
+      if (response.status === 'available' && response.frame && response.deliveredAtMs !== null) {
         retrievalDeliveries.push({
           sequence: response.frame.sequence,
-          timestampMs: response.frame.timestampMs,
+          capturedAtMs: response.frame.timestampMs,
+          deliveredAtMs: response.deliveredAtMs,
           bytes: response.bytes,
-          latencyMs: response.latencyMs,
         });
         retrievalBytes += response.bytes;
       }
@@ -266,12 +233,12 @@ export function runPhase2StrategyOnScene(
         const requestStarted = performance.now();
         const response = service.getFrameAtTimestamp(sessionId, query.atMs, 100);
         retrievalLatencies.push(performance.now() - requestStarted);
-        if (response.status === 'available' && response.frame) {
+        if (response.status === 'available' && response.frame && response.deliveredAtMs !== null) {
           retrievalDeliveries.push({
             sequence: response.frame.sequence,
-            timestampMs: response.frame.timestampMs,
+            capturedAtMs: response.frame.timestampMs,
+            deliveredAtMs: response.deliveredAtMs,
             bytes: response.bytes,
-            latencyMs: response.latencyMs,
           });
           retrievalBytes += response.bytes;
         }
@@ -279,27 +246,23 @@ export function runPhase2StrategyOnScene(
     }
   }
 
-  const realtimeEvaluation = evaluateScene(scene, realtimeDeliveries, processingMs);
-  const combinedEvaluation = evaluateScene(scene, [...realtimeDeliveries, ...retrievalDeliveries], processingMs);
-  const realtimeEvents: ResourceEvent[] = realtimeDeliveries.map((delivery) => ({ ...delivery, bytes: PHASE2_SAMPLE_BYTES }));
-  const retrievalEvents: ResourceEvent[] = retrievalDeliveries.map((delivery) => ({ ...delivery, bytes: delivery.bytes }));
-  const totalEvents = [...realtimeEvents, ...retrievalEvents];
+  const realtimeEvaluation = evaluateEvidence(scene, realtimeDeliveries);
+  const combinedEvaluation = evaluateEvidence(scene, realtimeDeliveries, retrievalDeliveries);
   const serviceStats = service.stats();
   const bufferStats = buffer.stats();
   const latency = retrievalLatencyStats(retrievalLatencies);
-  const realtimeBudgetViolations = countBudgetViolations(
-    realtimeDeliveries.map((delivery) => delivery.timestampMs),
-    BENCHMARK_FRAME_LIMIT,
+  const realtimeBudgetViolations = countResourceViolations(
+    realtimeDeliveries, BENCHMARK_FRAME_LIMIT, PHASE2_REALTIME_MAX_BYTES,
     BENCHMARK_BUDGET_WINDOW_MS,
   );
   const retrievalBudgetViolations = countResourceViolations(
-    retrievalEvents,
+    retrievalDeliveries,
     PHASE2_RETRIEVAL_MAX_FRAMES,
     PHASE2_RETRIEVAL_MAX_BYTES,
     PHASE2_RETRIEVAL_WINDOW_MS,
   );
   const totalBudgetViolations = countResourceViolations(
-    totalEvents,
+    [...realtimeDeliveries, ...retrievalDeliveries],
     PHASE2_TOTAL_MAX_FRAMES,
     PHASE2_TOTAL_MAX_BYTES,
     PHASE2_RETRIEVAL_WINDOW_MS,
@@ -328,6 +291,8 @@ export function runPhase2StrategyOnScene(
     missedAfter: combinedEvaluation.missedEvents,
     realtimeFirstCaptureLatencyMs: realtimeEvaluation.meanFirstCaptureLatencyMs,
     postFirstCaptureLatencyMs: combinedEvaluation.meanFirstCaptureLatencyMs,
+    evidenceTiming: combinedEvaluation.timing,
+    retrievalAvailable: serviceStats.available + serviceStats.partial,
     retrievalRequests: serviceStats.requests,
     retrievalDenied: serviceStats.budgetDenied,
     retrievalLatencyMeanMs: latency.mean,
@@ -341,8 +306,8 @@ export function runPhase2StrategyOnScene(
     realtimeBudgetViolations,
     retrievalBudgetViolations,
     totalBudgetViolations,
-    outsideRealtime: realtimeDeliveries.filter((delivery) => !inAnyEvent(delivery.timestampMs, scene)).length,
-    outsideRetrieval: retrievalDeliveries.filter((delivery) => !inAnyEvent(delivery.timestampMs, scene)).length,
+    outsideRealtime: realtimeDeliveries.filter((delivery) => !inAnyEvent(delivery.capturedAtMs, scene)).length,
+    outsideRetrieval: retrievalDeliveries.filter((delivery) => !inAnyEvent(delivery.capturedAtMs, scene)).length,
     missedBeforeIds: realtimeEvaluation.missedEventIds,
     missedAfterIds: combinedEvaluation.missedEventIds,
     inputDigest: inputDigest(scene),
@@ -398,6 +363,8 @@ export function aggregatePhase2(
     missedAfter: sum('missedAfter'),
     realtimeFirstCaptureLatencyMs: realtimeCaptured ? realtimeLatencyTotal / realtimeCaptured : null,
     postFirstCaptureLatencyMs: postCaptured ? postLatencyTotal / postCaptured : null,
+    evidenceTiming: aggregateEvidenceTiming(selected),
+    retrievalAvailable: sum('retrievalAvailable'),
     retrievalRequests: capturedRequests,
     retrievalDenied: sum('retrievalDenied'),
     retrievalLatencyMeanMs: capturedRequests ? latencyTotal / capturedRequests : null,
@@ -496,7 +463,7 @@ export function runPhase2Benchmark(): Phase2Report {
 
   return {
     schemaVersion: PHASE2_SCHEMA_VERSION,
-    phase: '2',
+    phase: '2-corrected',
     configuration,
     cueSelection: {
       intervalMs: selectedCueInterval,
@@ -513,7 +480,7 @@ export function runPhase2Benchmark(): Phase2Report {
       'The oracle strategy uses event midpoint labels to request a frame. It is an upper-bound experiment only, is not evidence of autonomous discovery, and bypasses the production retrieval budget.',
       'Retrieval requests are charged to a separate retrieval budget and to a combined real-time + retrieval budget. The buffer is bounded by age, bytes, and frames.',
       'Events with no captured input frame cannot be recovered from the buffer. Retrieval can only return frames that were actually stored and are still retained.',
-      'Recall means a frame was delivered inside a labeled event window. It does not measure model understanding or task success.',
+      'Evidence coverage uses capture inside the labeled window. Deadline coverage requires delivery before the window closes. Budget auditing uses delivery time.',
       'Retrieval latency is measured wall-clock time and varies between runs; sampling decisions and replay inputs are deterministic.',
     ],
   };

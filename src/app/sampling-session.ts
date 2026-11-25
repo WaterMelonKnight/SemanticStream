@@ -72,7 +72,7 @@ export class SamplingSession {
   private readonly fixedSendRate = new RollingRate(RATE_WINDOW_MS, 200);
   private readonly agents: Record<SamplingMode, MockAgent>;
   private readonly adaptivePolicy: AdaptiveStrategyPolicy;
-  private readonly adaptiveBudget: BudgetController;
+  private readonly adaptiveBudget: BudgetController | undefined;
   private readonly fixedBudget: BudgetController;
   private readonly samplers: Record<SamplingMode, Sampler<VisualFrame, PixelSample>>;
 
@@ -99,20 +99,20 @@ export class SamplingSession {
         minChangedBlocks: 1,
       },
     });
-    this.adaptiveBudget = new BudgetController(BUDGET_WINDOW_MS, settings.budget);
+    this.adaptiveBudget = settings.admission ? undefined : new BudgetController(BUDGET_WINDOW_MS, settings.budget);
     this.fixedBudget = new BudgetController(BUDGET_WINDOW_MS, settings.budget);
     const fixedPolicy: SamplingPolicy<PixelSample> = new FixedSamplingPolicy(250);
     this.samplers = {
       adaptive: new Sampler(
         this.adaptivePolicy,
-        this.adaptiveBudget,
+        settings.admission ?? this.adaptiveBudget!,
         DELIVERY_TIMING,
         this.agents.adaptive,
-        undefined,
-        settings.admission,
+        now,
         settings.deliveryBytes ?? SAMPLE_WIDTH * SAMPLE_HEIGHT * 4,
+        now,
       ),
-      fixed: new Sampler(fixedPolicy, this.fixedBudget, DELIVERY_TIMING, this.agents.fixed),
+      fixed: new Sampler(fixedPolicy, this.fixedBudget, DELIVERY_TIMING, this.agents.fixed, now, 0, now),
     };
   }
 
@@ -156,7 +156,7 @@ export class SamplingSession {
   }
 
   setBudget(frameLimit: number): void {
-    this.adaptiveBudget.setLimit(frameLimit);
+    this.adaptiveBudget?.setLimit(frameLimit);
     this.fixedBudget.setLimit(frameLimit);
   }
 

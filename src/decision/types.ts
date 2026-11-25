@@ -106,6 +106,8 @@ export interface DecisionProviderResult {
 
 export interface DecisionResult extends DecisionProviderResult {
   readonly providerId: string;
+  readonly startedAtMs: number;
+  readonly completedAtMs: number;
   readonly latencyMs: number;
   readonly timeoutMs: number;
   readonly degraded: boolean;

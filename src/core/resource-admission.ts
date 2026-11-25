@@ -1,5 +1,5 @@
 import { RollingResourceBudget } from './resource-budget';
-import type { ResourceBudgetLimits } from './resource-budget';
+import type { ResourceBudgetLimits, ResourceReservation } from './resource-budget';
 
 export interface ResourceAdmissionConfig {
   readonly realtime: ResourceBudgetLimits;
@@ -7,12 +7,11 @@ export interface ResourceAdmissionConfig {
   readonly total: ResourceBudgetLimits;
 }
 
-export interface ResourceSnapshot {
+export interface ResourceSnapshot extends ResourceBudgetLimits {
   readonly usedFrames: number;
   readonly usedBytes: number;
-  readonly maxFrames: number;
-  readonly maxBytes: number;
-  readonly windowMs: number;
+  readonly reservedFrames: number;
+  readonly reservedBytes: number;
 }
 
 export interface ResourceAdmissionSnapshot {
@@ -22,20 +21,15 @@ export interface ResourceAdmissionSnapshot {
 }
 
 export interface DeliveryAdmission {
-  canSend(timestampMs: number, bytes: number): boolean;
-  record(timestampMs: number, bytes: number): void;
+  reserveRealtime(timestampMs: number, bytes: number): ResourceReservation | null;
 }
 
-/**
- * One ex-ante admission point for real-time sends and active retrieval.
- * Real-time and retrieval remain separate sub-budgets, but both must also fit
- * the combined total. The sampler's own BudgetController still enforces its
- * rolling frame cap; this controller adds the shared resource gate.
- */
+/** Atomic sub-budget and total admission within one JavaScript runtime. */
 export class ResourceAdmissionController implements DeliveryAdmission {
   private readonly realtimeBudget: RollingResourceBudget;
   private readonly retrievalBudget: RollingResourceBudget;
   private readonly totalBudget: RollingResourceBudget;
+  private lastTimestampMs = -Infinity;
 
   constructor(config: ResourceAdmissionConfig) {
     if (config.realtime.windowMs !== config.retrieval.windowMs
@@ -47,24 +41,12 @@ export class ResourceAdmissionController implements DeliveryAdmission {
     this.totalBudget = new RollingResourceBudget(config.total);
   }
 
-  canSend(timestampMs: number, bytes: number): boolean {
-    return this.realtimeBudget.canSpend(timestampMs, 1, bytes)
-      && this.totalBudget.canSpend(timestampMs, 1, bytes);
+  reserveRealtime(timestampMs: number, bytes: number): ResourceReservation | null {
+    return this.reserve(this.realtimeBudget, timestampMs, 1, bytes);
   }
 
-  record(timestampMs: number, bytes: number): void {
-    this.realtimeBudget.record(timestampMs, 1, bytes);
-    this.totalBudget.record(timestampMs, 1, bytes);
-  }
-
-  canRetrieve(timestampMs: number, frames: number, bytes: number): boolean {
-    return this.retrievalBudget.canSpend(timestampMs, frames, bytes)
-      && this.totalBudget.canSpend(timestampMs, frames, bytes);
-  }
-
-  recordRetrieval(timestampMs: number, frames: number, bytes: number): void {
-    this.retrievalBudget.record(timestampMs, frames, bytes);
-    this.totalBudget.record(timestampMs, frames, bytes);
+  reserveRetrieval(timestampMs: number, frames: number, bytes: number): ResourceReservation | null {
+    return this.reserve(this.retrievalBudget, timestampMs, frames, bytes);
   }
 
   setRealtimeFrameLimit(maxFrames: number): void {
@@ -76,13 +58,57 @@ export class ResourceAdmissionController implements DeliveryAdmission {
   }
 
   snapshot(nowMs: number): ResourceAdmissionSnapshot {
-    const realtime = this.realtimeBudget.used(nowMs);
-    const retrieval = this.retrievalBudget.used(nowMs);
-    const total = this.totalBudget.used(nowMs);
-    return {
-      realtime: { usedFrames: realtime.frames, usedBytes: realtime.bytes, ...this.realtimeBudget.limits },
-      retrieval: { usedFrames: retrieval.frames, usedBytes: retrieval.bytes, ...this.retrievalBudget.limits },
-      total: { usedFrames: total.frames, usedBytes: total.bytes, ...this.totalBudget.limits },
+    this.advance(nowMs);
+    const snapshotBudget = (budget: RollingResourceBudget): ResourceSnapshot => {
+      const used = budget.used(nowMs);
+      const reserved = budget.reserved;
+      return {
+        ...budget.limits, usedFrames: used.frames, usedBytes: used.bytes,
+        reservedFrames: reserved.frames, reservedBytes: reserved.bytes,
+      };
     };
+    return {
+      realtime: snapshotBudget(this.realtimeBudget),
+      retrieval: snapshotBudget(this.retrievalBudget),
+      total: snapshotBudget(this.totalBudget),
+    };
+  }
+
+  private reserve(
+    lane: RollingResourceBudget, timestampMs: number, frames: number, bytes: number,
+  ): ResourceReservation | null {
+    this.advance(timestampMs);
+    const laneHold = lane.reserve(timestampMs, frames, bytes);
+    if (!laneHold) return null;
+    const totalHold = this.totalBudget.reserve(timestampMs, frames, bytes);
+    if (!totalHold) {
+      laneHold.release();
+      return null;
+    }
+    let pending = true;
+    return {
+      commit: (deliveredAtMs) => {
+        if (!pending) return false;
+        this.advance(deliveredAtMs);
+        laneHold.commit(deliveredAtMs);
+        totalHold.commit(deliveredAtMs);
+        pending = false;
+        return true;
+      },
+      release: () => {
+        if (!pending) return false;
+        laneHold.release();
+        totalHold.release();
+        pending = false;
+        return true;
+      },
+    };
+  }
+
+  private advance(timestampMs: number): void {
+    if (!Number.isFinite(timestampMs) || timestampMs < this.lastTimestampMs) {
+      throw new RangeError('Admission timestamps must be finite and nondecreasing.');
+    }
+    this.lastTimestampMs = timestampMs;
   }
 }

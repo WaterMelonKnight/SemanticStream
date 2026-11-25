@@ -467,7 +467,7 @@ function runDemo(): void {
     liveLastDecisionAt = timestampMs;
     liveDecisionPending = true;
     const taskAtDecision = liveTask;
-    const snapshot = retrievalService.admission.snapshot(timestampMs);
+    const snapshot = retrievalService.admission.snapshot(performance.now());
     const cache = liveBuffer.stats();
     const state: DecisionState = {
       sessionId: liveBuffer.sessionId,

@@ -5,7 +5,7 @@ import { formatPhase2Csv, formatPhase2Markdown } from './retrieval-report';
 describe('Phase 2 benchmark report', () => {
   it('runs tuning and held-out suites with cue and oracle results', () => {
     const report = runPhase2Benchmark();
-    expect(report.phase).toBe('2');
+    expect(report.phase).toBe('2-corrected');
     expect(report.cueSelection.intervalMs).toBeGreaterThan(0);
     expect(report.suites.evaluation.scenes.length).toBe(6);
     expect(report.suites.evaluation.aggregates).toHaveLength(4);

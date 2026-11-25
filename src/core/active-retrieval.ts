@@ -21,6 +21,8 @@ export interface RetrievalResponseBase {
   readonly method: RetrievalMethod;
   readonly status: RetrievalStatus;
   readonly requestedAtMs: number;
+  readonly completedAtMs: number;
+  readonly deliveredAtMs: number | null;
   readonly latencyMs: number;
   readonly message: string;
   readonly availableRange: TimeRange | null;
@@ -59,6 +61,8 @@ export interface RetrievalLogEntry {
   readonly requestId: string;
   readonly method: RetrievalMethod;
   readonly requestedAtMs: number;
+  readonly completedAtMs: number;
+  readonly deliveredAtMs: number | null;
   readonly latencyMs: number;
   readonly status: RetrievalStatus;
   readonly frameCount: number;
@@ -142,11 +146,6 @@ export class ActiveRetrievalService {
     this.admission.setTotalFrameLimit(maxFrames);
   }
 
-  /** Record a frame already delivered by the real-time sampler. */
-  recordRealtimeSend(timestampMs: number, bytes: number): void {
-    this.admission.record(timestampMs, bytes);
-  }
-
   getLatestFrame(sessionId: string): FrameRetrievalResponse {
     return this.frameRequest('getLatestFrame', sessionId, () => this.buffer.getLatestFrame(sessionId));
   }
@@ -171,22 +170,23 @@ export class ActiveRetrievalService {
   ): RangeRetrievalResponse {
     const startedAt = this.now();
     const requestId = this.nextRequestId();
-    const base = this.responseBase(requestId, sessionId, 'getFramesBetween', startedAt);
-    if (this.disposed) return this.rangeFailure(base, startMs, endMs, 'disposed', 'The retrieval service is disposed.');
+    const failureBase = () => this.responseBase(requestId, sessionId, 'getFramesBetween', startedAt);
+    if (this.disposed) return this.rangeFailure(failureBase(), startMs, endMs, 'disposed', 'The retrieval service is disposed.');
     if (sessionId !== this.config.sessionId) {
-      return this.rangeFailure(base, startMs, endMs, 'wrong-session', 'The request belongs to a different buffer session.');
+      return this.rangeFailure(failureBase(), startMs, endMs, 'wrong-session', 'The request belongs to a different buffer session.');
     }
     const result = this.buffer.getFramesBetween(sessionId, startMs, endMs, options);
     const baseAfter = this.responseBase(requestId, sessionId, 'getFramesBetween', startedAt);
     if (result.status === 'available' || result.status === 'partial') {
-      if (!this.canRetrieve(result.frames.length, result.byteCount)) {
+      const delivery = this.deliver(baseAfter.completedAtMs, result.frames.length, result.byteCount);
+      if (!delivery) {
         const denied = this.rangeFailure(baseAfter, startMs, endMs, 'budget-denied', 'Retrieval budget or total resource budget is exhausted.');
         this.record(denied, 0, 0);
         return denied;
       }
-      this.spend(result.frames.length, result.byteCount);
       const response: RangeRetrievalResponse = {
         ...baseAfter,
+        ...delivery,
         status: result.status,
         message: result.message,
         frames: result.frames,
@@ -219,24 +219,25 @@ export class ActiveRetrievalService {
   ): RegionRetrievalResponse {
     const startedAt = this.now();
     const requestId = this.nextRequestId();
-    const base = this.responseBase(requestId, sessionId, 'getRegion', startedAt);
+    const failureBase = () => this.responseBase(requestId, sessionId, 'getRegion', startedAt);
     if (this.disposed) {
-      return this.regionFailure(base, region, 'disposed', 'The retrieval service is disposed.');
+      return this.regionFailure(failureBase(), region, 'disposed', 'The retrieval service is disposed.');
     }
     if (sessionId !== this.config.sessionId) {
-      return this.regionFailure(base, region, 'wrong-session', 'The request belongs to a different buffer session.');
+      return this.regionFailure(failureBase(), region, 'wrong-session', 'The request belongs to a different buffer session.');
     }
     const result = this.buffer.getRegion(sessionId, locator, region);
     const baseAfter = this.responseBase(requestId, sessionId, 'getRegion', startedAt);
     if (result.status === 'available' && result.image) {
-      if (!this.canRetrieve(1, result.image.byteSize)) {
+      const delivery = this.deliver(baseAfter.completedAtMs, 1, result.image.byteSize);
+      if (!delivery) {
         const denied = this.regionFailure(baseAfter, region, 'budget-denied', 'Retrieval budget or total resource budget is exhausted.');
         this.record(denied, 0, 0);
         return denied;
       }
-      this.spend(1, result.image.byteSize);
       const response: RegionRetrievalResponse = {
         ...baseAfter,
+        ...delivery,
         status: 'available',
         message: result.message,
         sourceFrame: result.sourceFrame,
@@ -290,10 +291,10 @@ export class ActiveRetrievalService {
   ): FrameRetrievalResponse {
     const startedAt = this.now();
     const requestId = this.nextRequestId();
-    const base = this.responseBase(requestId, sessionId, method, startedAt);
-    if (this.disposed) return this.frameFailure(base, 'disposed', 'The retrieval service is disposed.');
+    const failureBase = () => this.responseBase(requestId, sessionId, method, startedAt);
+    if (this.disposed) return this.frameFailure(failureBase(), 'disposed', 'The retrieval service is disposed.');
     if (sessionId !== this.config.sessionId) {
-      return this.frameFailure(base, 'wrong-session', 'The request belongs to a different buffer session.');
+      return this.frameFailure(failureBase(), 'wrong-session', 'The request belongs to a different buffer session.');
     }
 
     const result = lookup();
@@ -303,14 +304,15 @@ export class ActiveRetrievalService {
       this.record(response, 0, 0);
       return response;
     }
-    if (!this.canRetrieve(1, result.frame.byteSize)) {
+    const delivery = this.deliver(baseAfter.completedAtMs, 1, result.frame.byteSize);
+    if (!delivery) {
       const denied = this.frameFailure(baseAfter, 'budget-denied', 'Retrieval budget or total resource budget is exhausted.');
       this.record(denied, 0, 0);
       return denied;
     }
-    this.spend(1, result.frame.byteSize);
     const response: FrameRetrievalResponse = {
       ...baseAfter,
+      ...delivery,
       status: 'available',
       message: result.message,
       frame: result.frame,
@@ -326,22 +328,25 @@ export class ActiveRetrievalService {
     method: RetrievalMethod,
     startedAt: number,
   ): RetrievalResponseBase {
-    const bufferStats = this.buffer.stats();
+    const completedAtMs = this.now();
+    const bufferStats = sessionId === this.sessionId ? this.buffer.stats() : null;
     return {
       requestId,
       sessionId,
       method,
       status: 'nonexistent',
       requestedAtMs: startedAt,
-      latencyMs: Math.max(0, this.now() - startedAt),
+      completedAtMs,
+      deliveredAtMs: null,
+      latencyMs: completedAtMs - startedAt,
       message: '',
-      availableRange: bufferStats.oldestTimestampMs === null
+      availableRange: bufferStats?.oldestTimestampMs == null
         ? null
         : { startMs: bufferStats.oldestTimestampMs, endMs: bufferStats.latestTimestampMs ?? bufferStats.oldestTimestampMs },
-      capturedRange: bufferStats.firstCapturedTimestampMs === null
+      capturedRange: bufferStats?.firstCapturedTimestampMs == null
         ? null
         : { startMs: bufferStats.firstCapturedTimestampMs, endMs: bufferStats.lastCapturedTimestampMs ?? bufferStats.firstCapturedTimestampMs },
-      budget: this.budgetSnapshot(this.now()),
+      budget: this.budgetSnapshot(completedAtMs),
     };
   }
 
@@ -389,12 +394,11 @@ export class ActiveRetrievalService {
     };
   }
 
-  private canRetrieve(frames: number, bytes: number): boolean {
-    return this.admission.canRetrieve(this.now(), frames, bytes);
-  }
-
-  private spend(frames: number, bytes: number): void {
-    this.admission.recordRetrieval(this.now(), frames, bytes);
+  private deliver(deliveredAtMs: number, frames: number, bytes: number) {
+    const hold = this.admission.reserveRetrieval(deliveredAtMs, frames, bytes);
+    if (!hold) return null;
+    hold.commit(deliveredAtMs);
+    return { deliveredAtMs, budget: this.budgetSnapshot(deliveredAtMs) };
   }
 
   private budgetSnapshot(now: number): RetrievalBudgetSnapshot {
@@ -413,6 +417,8 @@ export class ActiveRetrievalService {
       requestId: response.requestId,
       method: response.method,
       requestedAtMs: response.requestedAtMs,
+      completedAtMs: response.completedAtMs,
+      deliveredAtMs: response.deliveredAtMs,
       latencyMs: response.latencyMs,
       status: response.status,
       frameCount,

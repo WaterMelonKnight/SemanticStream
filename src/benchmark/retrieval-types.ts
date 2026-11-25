@@ -1,7 +1,8 @@
 import type { RetrievalLogEntry } from '../core/active-retrieval';
+import type { EvidenceTiming } from './evidence';
 import type { SceneSuite } from './types';
 
-export const PHASE2_SCHEMA_VERSION = 2;
+export const PHASE2_SCHEMA_VERSION = 3;
 
 export type Phase2StrategyId =
   | 'fixed'
@@ -63,6 +64,8 @@ export interface Phase2SceneResult {
   readonly missedAfter: number;
   readonly realtimeFirstCaptureLatencyMs: number | null;
   readonly postFirstCaptureLatencyMs: number | null;
+  readonly evidenceTiming: EvidenceTiming;
+  readonly retrievalAvailable: number;
   readonly retrievalRequests: number;
   readonly retrievalDenied: number;
   readonly retrievalLatencyMeanMs: number | null;
@@ -106,6 +109,8 @@ export interface Phase2Aggregate {
   readonly missedAfter: number;
   readonly realtimeFirstCaptureLatencyMs: number | null;
   readonly postFirstCaptureLatencyMs: number | null;
+  readonly evidenceTiming: EvidenceTiming;
+  readonly retrievalAvailable: number;
   readonly retrievalRequests: number;
   readonly retrievalDenied: number;
   readonly retrievalLatencyMeanMs: number | null;
@@ -160,7 +165,7 @@ export interface Phase2CueSelection {
 
 export interface Phase2Report {
   readonly schemaVersion: number;
-  readonly phase: '2';
+  readonly phase: '2-corrected';
   readonly configuration: Phase2Configuration;
   readonly cueSelection: Phase2CueSelection;
   readonly suites: Readonly<Record<SceneSuite, Phase2SuiteResult>>;
