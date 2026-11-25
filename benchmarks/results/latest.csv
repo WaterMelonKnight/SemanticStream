@@ -1,0 +1,57 @@
+suite,scene,scene_description,strategy,strategy_label,inputs,sent,events,observable_events,captured_events,missed_events,unobservable_events,recall,mean_first_capture_latency_ms,max_first_capture_latency_ms,sent_outside_events,mean_processing_ms,p95_processing_ms,budget_violations,missed_event_ids,input_digest,decision_digest
+tuning,tune-local-text,Two brief high-contrast text changes that occupy less than 1% of the frame.,fixed,Fixed · 4 fps,180,24,2,2,2,0,0,1.000000,166.667,166.667,20,0.0024,0.0022,0,,99dc3b20,1b33d733
+tuning,tune-local-text,Two brief high-contrast text changes that occupy less than 1% of the frame.,global,Adaptive · global RGB,180,4,2,2,0,2,0,0.000000,,,4,0.0239,0.0269,0,tune-local-a|tune-local-b,99dc3b20,5fe14368
+tuning,tune-local-text,Two brief high-contrast text changes that occupy less than 1% of the frame.,local,Adaptive · local blocks,180,7,2,2,2,0,0,1.000000,16.667,33.333,5,0.0275,0.0294,0,,99dc3b20,2fd7b604
+tuning,tune-local-text,Two brief high-contrast text changes that occupy less than 1% of the frame.,hybrid,Adaptive · hybrid,180,7,2,2,2,0,0,1.000000,16.667,33.333,5,0.0483,0.0509,0,,99dc3b20,2fd7b604
+tuning,tune-brief,"Two 100 ms local events, shorter than the 125 ms delivery spacing.",fixed,Fixed · 4 fps,180,24,2,2,0,2,0,0.000000,,,24,0.0008,0.0009,0,tune-brief-a|tune-brief-b,99dc3b20,1b33d733
+tuning,tune-brief,"Two 100 ms local events, shorter than the 125 ms delivery spacing.",global,Adaptive · global RGB,180,4,2,2,0,2,0,0.000000,,,4,0.0237,0.0246,0,tune-brief-a|tune-brief-b,99dc3b20,5fe14368
+tuning,tune-brief,"Two 100 ms local events, shorter than the 125 ms delivery spacing.",local,Adaptive · local blocks,180,8,2,2,2,0,0,1.000000,0.000,0.000,6,0.0278,0.0293,0,,99dc3b20,bd7b6625
+tuning,tune-brief,"Two 100 ms local events, shorter than the 125 ms delivery spacing.",hybrid,Adaptive · hybrid,180,8,2,2,2,0,0,1.000000,0.000,0.000,6,0.0498,0.0648,0,,99dc3b20,bd7b6625
+tuning,tune-low-contrast,Two low-contrast local changes (+10 RGB) spread across a 16×10 region.,fixed,Fixed · 4 fps,180,24,2,2,2,0,0,1.000000,166.667,166.667,18,0.0009,0.0009,0,,99dc3b20,1b33d733
+tuning,tune-low-contrast,Two low-contrast local changes (+10 RGB) spread across a 16×10 region.,global,Adaptive · global RGB,180,4,2,2,0,2,0,0.000000,,,4,0.0226,0.0234,0,tune-low-a|tune-low-b,99dc3b20,5fe14368
+tuning,tune-low-contrast,Two low-contrast local changes (+10 RGB) spread across a 16×10 region.,local,Adaptive · local blocks,180,7,2,2,2,0,0,1.000000,16.667,33.333,5,0.0265,0.0282,0,,99dc3b20,d0f92536
+tuning,tune-low-contrast,Two low-contrast local changes (+10 RGB) spread across a 16×10 region.,hybrid,Adaptive · hybrid,180,7,2,2,2,0,0,1.000000,16.667,33.333,5,0.0490,0.0549,0,,99dc3b20,d0f92536
+tuning,tune-slow-change,A slow whole-frame brightness ramp that accumulates against the last accepted frame.,fixed,Fixed · 4 fps,180,24,1,1,1,0,0,1.000000,100.000,100.000,10,0.0005,0.0006,0,,99dc3b20,1b33d733
+tuning,tune-slow-change,A slow whole-frame brightness ramp that accumulates against the last accepted frame.,global,Adaptive · global RGB,180,7,1,1,1,0,0,1.000000,100.000,100.000,2,0.0229,0.0235,0,,99dc3b20,4bfa754d
+tuning,tune-slow-change,A slow whole-frame brightness ramp that accumulates against the last accepted frame.,local,Adaptive · local blocks,180,5,1,1,1,0,0,1.000000,100.000,100.000,2,0.0270,0.0285,0,,99dc3b20,2000667c
+tuning,tune-slow-change,A slow whole-frame brightness ramp that accumulates against the last accepted frame.,hybrid,Adaptive · hybrid,180,7,1,1,1,0,0,1.000000,100.000,100.000,2,0.0482,0.0506,0,,99dc3b20,4bfa754d
+tuning,tune-background-motion,Irrelevant background motion crosses the frame while one small local event occurs.,fixed,Fixed · 4 fps,180,24,1,1,1,0,0,1.000000,0.000,0.000,22,0.0005,0.0007,0,,99dc3b20,1b33d733
+tuning,tune-background-motion,Irrelevant background motion crosses the frame while one small local event occurs.,global,Adaptive · global RGB,180,21,1,1,1,0,0,1.000000,0.000,0.000,19,0.0220,0.0251,0,,99dc3b20,acdb9c9b
+tuning,tune-background-motion,Irrelevant background motion crosses the frame while one small local event occurs.,local,Adaptive · local blocks,180,21,1,1,0,1,0,0.000000,,,21,0.0236,0.0291,0,tune-motion-text,99dc3b20,0077c8e0
+tuning,tune-background-motion,Irrelevant background motion crosses the frame while one small local event occurs.,hybrid,Adaptive · hybrid,180,21,1,1,0,1,0,0.000000,,,21,0.0334,0.0499,0,tune-motion-text,99dc3b20,0077c8e0
+tuning,tune-capture-pause,A 1.2–1.3 second capture gap hides one event and a later event remains visible.,fixed,Fixed · 4 fps,138,20,2,1,1,0,1,1.000000,166.667,166.667,18,0.0005,0.0006,0,,0f505e71,e27e3eb4
+tuning,tune-capture-pause,A 1.2–1.3 second capture gap hides one event and a later event remains visible.,global,Adaptive · global RGB,138,4,2,1,1,0,1,1.000000,100.000,100.000,3,0.0227,0.0253,0,,0f505e71,90e364e7
+tuning,tune-capture-pause,A 1.2–1.3 second capture gap hides one event and a later event remains visible.,local,Adaptive · local blocks,138,5,2,1,1,0,1,1.000000,0.000,0.000,4,0.0266,0.0290,0,,0f505e71,d038a6fd
+tuning,tune-capture-pause,A 1.2–1.3 second capture gap hides one event and a later event remains visible.,hybrid,Adaptive · hybrid,138,5,2,1,1,0,1,1.000000,0.000,0.000,4,0.0483,0.0506,0,,0f505e71,d038a6fd
+tuning,AGGREGATE,,fixed,Fixed · 4 fps,1038,140,10,9,7,2,1,0.777778,133.334,166.667,112,0.0009,,0,,,
+tuning,AGGREGATE,,global,Adaptive · global RGB,1038,44,10,9,3,6,1,0.333333,66.667,100.000,36,0.0230,,0,,,
+tuning,AGGREGATE,,local,Adaptive · local blocks,1038,53,10,9,8,1,1,0.888889,20.833,100.000,43,0.0265,,0,,,
+tuning,AGGREGATE,,hybrid,Adaptive · hybrid,1038,55,10,9,8,1,1,0.888889,20.833,100.000,43,0.0461,,0,,,
+evaluation,eval-local-text,Two brief high-contrast text changes that occupy less than 1% of the frame.,fixed,Fixed · 4 fps,180,24,2,2,2,0,0,1.000000,133.334,200.000,19,0.0006,0.0007,0,,99dc3b20,1b33d733
+evaluation,eval-local-text,Two brief high-contrast text changes that occupy less than 1% of the frame.,global,Adaptive · global RGB,180,4,2,2,1,1,0,0.500000,300.000,300.000,3,0.0229,0.0249,0,eval-local-a,99dc3b20,5fe14368
+evaluation,eval-local-text,Two brief high-contrast text changes that occupy less than 1% of the frame.,local,Adaptive · local blocks,180,7,2,2,2,0,0,1.000000,0.000,0.000,5,0.0264,0.0284,0,,99dc3b20,905dd0bb
+evaluation,eval-local-text,Two brief high-contrast text changes that occupy less than 1% of the frame.,hybrid,Adaptive · hybrid,180,7,2,2,2,0,0,1.000000,0.000,0.000,5,0.0492,0.0516,0,,99dc3b20,905dd0bb
+evaluation,eval-brief,"Two 100 ms local events, shorter than the 125 ms delivery spacing.",fixed,Fixed · 4 fps,180,24,2,2,1,1,0,0.500000,66.667,66.667,23,0.0006,0.0009,0,eval-brief-b,99dc3b20,1b33d733
+evaluation,eval-brief,"Two 100 ms local events, shorter than the 125 ms delivery spacing.",global,Adaptive · global RGB,180,4,2,2,0,2,0,0.000000,,,4,0.0227,0.0236,0,eval-brief-a|eval-brief-b,99dc3b20,5fe14368
+evaluation,eval-brief,"Two 100 ms local events, shorter than the 125 ms delivery spacing.",local,Adaptive · local blocks,180,7,2,2,2,0,0,1.000000,0.000,0.000,5,0.0273,0.0292,0,,99dc3b20,cb9cb907
+evaluation,eval-brief,"Two 100 ms local events, shorter than the 125 ms delivery spacing.",hybrid,Adaptive · hybrid,180,7,2,2,2,0,0,1.000000,0.000,0.000,5,0.0485,0.0519,0,,99dc3b20,cb9cb907
+evaluation,eval-low-contrast,Two low-contrast local changes (+12 RGB) spread across a 16×10 region.,fixed,Fixed · 4 fps,180,24,2,2,2,0,0,1.000000,200.000,200.000,20,0.0006,0.0007,0,,99dc3b20,1b33d733
+evaluation,eval-low-contrast,Two low-contrast local changes (+12 RGB) spread across a 16×10 region.,global,Adaptive · global RGB,180,4,2,2,1,1,0,0.500000,200.000,200.000,3,0.0231,0.0240,0,eval-low-a,99dc3b20,5fe14368
+evaluation,eval-low-contrast,Two low-contrast local changes (+12 RGB) spread across a 16×10 region.,local,Adaptive · local blocks,180,7,2,2,2,0,0,1.000000,0.000,0.000,5,0.0267,0.0286,0,,99dc3b20,d3db1a76
+evaluation,eval-low-contrast,Two low-contrast local changes (+12 RGB) spread across a 16×10 region.,hybrid,Adaptive · hybrid,180,7,2,2,2,0,0,1.000000,0.000,0.000,5,0.0488,0.0520,0,,99dc3b20,d3db1a76
+evaluation,eval-slow-change,A slow whole-frame brightness ramp that accumulates against the last accepted frame.,fixed,Fixed · 4 fps,180,24,1,1,1,0,0,1.000000,0.000,0.000,10,0.0006,0.0007,0,,99dc3b20,1b33d733
+evaluation,eval-slow-change,A slow whole-frame brightness ramp that accumulates against the last accepted frame.,global,Adaptive · global RGB,180,8,1,1,1,0,0,1.000000,0.000,0.000,2,0.0234,0.0244,0,,99dc3b20,0b9dd38e
+evaluation,eval-slow-change,A slow whole-frame brightness ramp that accumulates against the last accepted frame.,local,Adaptive · local blocks,180,5,1,1,1,0,0,1.000000,0.000,0.000,2,0.0276,0.0297,0,,99dc3b20,3ad87ad5
+evaluation,eval-slow-change,A slow whole-frame brightness ramp that accumulates against the last accepted frame.,hybrid,Adaptive · hybrid,180,8,1,1,1,0,0,1.000000,0.000,0.000,2,0.0478,0.0506,0,,99dc3b20,0b9dd38e
+evaluation,eval-background-motion,Irrelevant background motion crosses the frame while one small local event occurs.,fixed,Fixed · 4 fps,180,24,1,1,1,0,0,1.000000,66.667,66.667,22,0.0005,0.0005,0,,99dc3b20,1b33d733
+evaluation,eval-background-motion,Irrelevant background motion crosses the frame while one small local event occurs.,global,Adaptive · global RGB,180,21,1,1,0,1,0,0.000000,,,21,0.0217,0.0238,0,eval-motion-text,99dc3b20,acdb9c9b
+evaluation,eval-background-motion,Irrelevant background motion crosses the frame while one small local event occurs.,local,Adaptive · local blocks,180,21,1,1,0,1,0,0.000000,,,21,0.0236,0.0290,0,eval-motion-text,99dc3b20,0077c8e0
+evaluation,eval-background-motion,Irrelevant background motion crosses the frame while one small local event occurs.,hybrid,Adaptive · hybrid,180,21,1,1,0,1,0,0.000000,,,21,0.0342,0.0507,0,eval-motion-text,99dc3b20,0077c8e0
+evaluation,eval-capture-pause,A 1.2–1.3 second capture gap hides one event and a later event remains visible.,fixed,Fixed · 4 fps,141,19,2,1,1,0,1,1.000000,166.667,166.667,17,0.0005,0.0007,0,,1da76e24,c5d0ed2c
+evaluation,eval-capture-pause,A 1.2–1.3 second capture gap hides one event and a later event remains visible.,global,Adaptive · global RGB,141,4,2,1,0,1,1,0.000000,,,4,0.0309,0.0235,0,eval-pause-visible,1da76e24,f067fe89
+evaluation,eval-capture-pause,A 1.2–1.3 second capture gap hides one event and a later event remains visible.,local,Adaptive · local blocks,141,6,2,1,1,0,1,1.000000,33.333,33.333,5,0.0267,0.0289,0,,1da76e24,561b86cc
+evaluation,eval-capture-pause,A 1.2–1.3 second capture gap hides one event and a later event remains visible.,hybrid,Adaptive · hybrid,141,6,2,1,1,0,1,1.000000,33.333,33.333,5,0.0476,0.0509,0,,1da76e24,561b86cc
+evaluation,AGGREGATE,,fixed,Fixed · 4 fps,1041,139,10,9,8,1,1,0.888889,120.834,200.000,111,0.0006,,0,,,
+evaluation,AGGREGATE,,global,Adaptive · global RGB,1041,45,10,9,3,6,1,0.333333,166.667,300.000,37,0.0239,,0,,,
+evaluation,AGGREGATE,,local,Adaptive · local blocks,1041,53,10,9,8,1,1,0.888889,4.167,33.333,43,0.0264,,0,,,
+evaluation,AGGREGATE,,hybrid,Adaptive · hybrid,1041,56,10,9,8,1,1,0.888889,4.167,33.333,43,0.0460,,0,,,
