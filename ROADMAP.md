@@ -42,8 +42,17 @@
 - Add task selection, ROI editing, live decision records, an optional live send gate, remaining budgets, and Phase 3A evaluation results to the page.
 - Document how Laya, AnyJev, Jev API, generic structured-output models, and local classifiers could plug into the provider boundary without changing budgets or safety checks.
 
-## Next
+## Phase 3R · Runtime foundation
 
-- Implement one real local model adapter behind `DecisionProvider` and calibrate its probabilities before ranking them against heuristic scores.
-- Add an opt-in asynchronous sink and a bounded backpressure policy.
-- Validate task ROI and decision latency on a real screen or camera source with explicit permission handling.
+- [Audit](docs/architecture-audit-phase3r.md) the browser and replay execution paths from the merged Phase 3A baseline.
+- Isolate session and task revisions, supervise cancellable providers, and bound unresolved work and observation age.
+- Reserve real-time and retrieval capacity atomically and settle charges on delivery. Preserve the independent fixed comparison and existing visual sources.
+- Correct replay timing and spatial evidence coverage. Version the corrected outputs and preserve the original Phase 1B, 2 and 3A benchmarks.
+- Capture extension boundaries in [runtime architecture v2](docs/runtime-architecture-v2.md) and [inference orchestration](docs/inference-orchestration-design.md).
+
+## Phase 4A · Single-endpoint inference lifecycle
+
+- Implement a Node-testable, bounded scheduler and output coordinator with one scripted fake streaming endpoint and two or more logical slots.
+- Dispatch each task against a frozen visual evidence snapshot with session, task and interaction provenance.
+- Verify overlapping requests, overload, deadline expiry, cancellation, stale partial suppression and provisional usage when a terminal receipt is absent.
+- Add a deterministic replay of this lifecycle. Defer real model adapters, heterogeneous pools, native bidirectional transport, and billing until the single-endpoint invariants hold.

@@ -62,3 +62,25 @@ describe('Phase 2 retrieval replay', () => {
     expect(second.realtimeSent).toBe(first.realtimeSent);
   });
 });
+
+it('runs the oracle lookup at the first observed tick at or after its cue', () => {
+  const sample = new Uint8ClampedArray(96 * 54 * 4);
+  const scene: BenchmarkScene = {
+    id: 'causal-oracle',
+    suite: 'evaluation',
+    description: 'Oracle query falls inside a capture gap.',
+    frames: [
+      { sequence: 1, timestampMs: 0, sample },
+      { sequence: 2, timestampMs: 300, sample },
+      { sequence: 3, timestampMs: 310, sample },
+    ],
+    events: [{
+      id: 'gap', kind: 'brief', startMs: 145, endMs: 155,
+      region: { x: 0, y: 0, width: 1, height: 1 }, description: 'No retained capture within tolerance.',
+    }],
+  };
+  const result = runPhase2StrategyOnScene(scene, 'local-oracle-retrieval');
+  expect(result.retrievalFrames).toBe(0);
+  expect(result.retrievalLog).toHaveLength(1);
+  expect(result.retrievalLog[0]).toMatchObject({ requestedAtMs: 300, deliveredAtMs: null });
+});

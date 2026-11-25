@@ -12,13 +12,10 @@ const csv = formatReportCsv(report);
 const markdown = formatReportMarkdown(report);
 
 const resultsDirectory = resolve(process.cwd(), 'benchmarks/results');
-const publicDirectory = resolve(process.cwd(), 'public/benchmark');
 mkdirSync(resultsDirectory, { recursive: true });
-mkdirSync(publicDirectory, { recursive: true });
-writeFileSync(resolve(resultsDirectory, 'latest.json'), json);
-writeFileSync(resolve(resultsDirectory, 'latest.csv'), csv);
-writeFileSync(resolve(resultsDirectory, 'latest.md'), markdown);
-writeFileSync(resolve(publicDirectory, 'latest.json'), json);
+writeFileSync(resolve(resultsDirectory, 'phase1b-replay.json'), json);
+writeFileSync(resolve(resultsDirectory, 'phase1b-replay.csv'), csv);
+writeFileSync(resolve(resultsDirectory, 'phase1b-replay.md'), markdown);
 
 function printAggregates(title: string, aggregates: readonly StrategyAggregate[]): void {
   console.log(title);
@@ -38,4 +35,4 @@ console.log(`SemanticStream Phase 1B benchmark (${report.suites.evaluation.scene
 console.log(`Selected local detector: ${report.selection.local.threshold}% / ${report.selection.local.blockWidth}×${report.selection.local.blockHeight}`);
 printAggregates('Held-out evaluation:', report.suites.evaluation.aggregates);
 printAggregates('Tuning:', report.suites.tuning.aggregates);
-console.log(`Wrote ${resultsDirectory}/latest.{json,csv,md} and ${publicDirectory}/latest.json`);
+console.log(`Wrote ${resultsDirectory}/phase1b-replay.{json,csv,md}`);

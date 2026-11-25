@@ -15,10 +15,10 @@ const resultsDirectory = resolve(process.cwd(), 'benchmarks/results');
 const publicDirectory = resolve(process.cwd(), 'public/benchmark');
 mkdirSync(resultsDirectory, { recursive: true });
 mkdirSync(publicDirectory, { recursive: true });
-writeFileSync(resolve(resultsDirectory, 'phase2.json'), json);
-writeFileSync(resolve(resultsDirectory, 'phase2.csv'), csv);
-writeFileSync(resolve(resultsDirectory, 'phase2.md'), markdown);
-writeFileSync(resolve(publicDirectory, 'phase2.json'), json);
+writeFileSync(resolve(resultsDirectory, 'phase2-corrected.json'), json);
+writeFileSync(resolve(resultsDirectory, 'phase2-corrected.csv'), csv);
+writeFileSync(resolve(resultsDirectory, 'phase2-corrected.md'), markdown);
+writeFileSync(resolve(publicDirectory, 'phase2-corrected.json'), json);
 
 function printAggregates(title: string, aggregates: readonly Phase2Aggregate[]): void {
   console.log(title);
@@ -35,8 +35,8 @@ function printAggregates(title: string, aggregates: readonly Phase2Aggregate[]):
   }
 }
 
-console.log(`SemanticStream Phase 2 retrieval benchmark (${report.suites.evaluation.scenes.length} evaluation scenes)`);
+console.log(`SemanticStream Phase 2 retrieval benchmark, corrected (${report.suites.evaluation.scenes.length} evaluation scenes)`);
 console.log(`Selected cue interval: ${report.cueSelection.intervalMs} ms`);
 printAggregates('Held-out evaluation:', report.suites.evaluation.aggregates);
 printAggregates('Tuning:', report.suites.tuning.aggregates);
-console.log(`Wrote ${resultsDirectory}/phase2.{json,csv,md} and ${publicDirectory}/phase2.json`);
+console.log(`Wrote ${resultsDirectory}/phase2-corrected.{json,csv,md} and ${publicDirectory}/phase2-corrected.json`);

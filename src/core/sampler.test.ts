@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BudgetController } from './budget';
+import { ResourceAdmissionController } from './resource-admission';
 import { Sampler } from './sampler';
 import { AdaptiveSamplingPolicy, FixedSamplingPolicy } from './sampling';
 import type { StreamFrame } from './stream';
@@ -106,29 +107,27 @@ describe('stream sampler', () => {
     expect(accepted).toEqual([1, 3, 5]);
   });
 
-  it('applies shared admission before the sink without charging the sampler budget on denial', () => {
-    const accepted: number[] = [];
-    const admitted: Array<{ timestampMs: number; bytes: number }> = [];
-    const admission = {
-      canSend: (timestampMs: number) => timestampMs !== 250,
-      record: (timestampMs: number, bytes: number) => admitted.push({ timestampMs, bytes }),
-    };
+  it('settles after sink acceptance and releases on refusal or exception', () => {
+    const limit = { windowMs: 5_000, maxFrames: 1, maxBytes: 100 };
+    const admission = new ResourceAdmissionController({ realtime: limit, retrieval: limit, total: limit });
+    let deliveryTime = 20;
     const sampler = new Sampler(
-      new FixedSamplingPolicy(250),
-      new BudgetController(5_000, 2),
-      timing,
-      { accept: ({ sequence }) => { accepted.push(sequence); return true; } },
-      () => 0,
-      admission,
-      100,
+      new FixedSamplingPolicy(250), admission, timing,
+      { accept: ({ sequence }) => {
+        if (sequence === 1) return false;
+        if (sequence === 2) throw new Error('sink error');
+        deliveryTime += 10;
+        return true;
+      } },
+      () => 0, 100, () => deliveryTime,
     );
-
-    expect(sampler.process(frame(0, 1), gray(0))).toBe('sent');
-    expect(sampler.process(frame(250, 2), gray(0))).toBe('budget');
+    expect(sampler.process(frame(0, 1), gray(0))).toBe('backpressure');
+    expect(() => sampler.process(frame(250, 2), gray(0))).toThrow('sink error');
+    expect(admission.snapshot(20).total).toMatchObject({ usedFrames: 0, reservedFrames: 0 });
     expect(sampler.process(frame(500, 3), gray(0))).toBe('sent');
-    expect(accepted).toEqual([1, 3]);
-    expect(admitted).toEqual([{ timestampMs: 0, bytes: 100 }, { timestampMs: 500, bytes: 100 }]);
-    expect(sampler.snapshot().reasons.budget).toBe(1);
+    expect(sampler.lastDeliveredAtMs).toBe(30);
+    expect(admission.snapshot(5_029).total.usedFrames).toBe(1);
+    expect(admission.snapshot(5_030).total.usedFrames).toBe(0);
   });
 
   it('retries an initially busy sink with the next frame', () => {

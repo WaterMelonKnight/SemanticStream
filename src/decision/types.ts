@@ -81,6 +81,7 @@ export interface DecisionRecentState {
 
 export interface DecisionState {
   readonly sessionId: string;
+  /** Monotonic runtime time when the observation snapshot was assembled. */
   readonly timestampMs: number;
   readonly task: TaskDefinition;
   readonly change: DecisionChangeState;
@@ -106,6 +107,8 @@ export interface DecisionProviderResult {
 
 export interface DecisionResult extends DecisionProviderResult {
   readonly providerId: string;
+  readonly startedAtMs: number;
+  readonly completedAtMs: number;
   readonly latencyMs: number;
   readonly timeoutMs: number;
   readonly degraded: boolean;

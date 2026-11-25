@@ -95,3 +95,6 @@ temp/
 
 # ========== 其他 ==========
 *.local
+
+# Fresh Phase 1B timings, separate from the historical tracked report.
+/benchmarks/results/phase1b-replay.*

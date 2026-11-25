@@ -1,4 +1,3 @@
-import type { BudgetController } from './budget';
 import { MetricsCollector } from './metrics';
 import type { FrameDecision, MetricsSnapshot } from './metrics';
 import type { SamplingContext, SamplingPolicy } from './sampling';
@@ -16,16 +15,18 @@ export class Sampler<T, Sample> {
   private readonly metrics = new MetricsCollector();
   private firstTimestampMs: number | undefined;
   private previousTimestampMs = -Infinity;
+  private deliveredAtMs: number | null = null;
+  private delivering = false;
   private lastDelivery: SamplingContext<Sample>['lastDelivery'] | undefined;
 
   constructor(
     private readonly policy: SamplingPolicy<Sample>,
-    private readonly budget: BudgetController,
+    private readonly admission: DeliveryAdmission,
     private readonly timing: DeliveryTiming,
     private readonly sink: ContextSink<T>,
     private readonly now: () => number = () => performance.now(),
-    private readonly admission?: DeliveryAdmission,
     private readonly deliveryBytes = 0,
+    private readonly deliveryClock?: () => number,
   ) {
     if (!Number.isFinite(timing.minimumIntervalMs) || timing.minimumIntervalMs < 0
       || !Number.isFinite(timing.maximumSilenceMs) || timing.maximumSilenceMs <= 0) {
@@ -35,6 +36,7 @@ export class Sampler<T, Sample> {
 
   /** Samples are immutable and may be retained as the most recent accepted baseline. */
   process(frame: StreamFrame<T>, sample: Sample, preparationMs = 0): FrameDecision {
+    if (this.delivering) throw new Error('Sampler processing cannot be reentered by its sink.');
     const startedAt = this.now();
     const { timestampMs } = frame;
     if (!Number.isFinite(timestampMs) || timestampMs < this.previousTimestampMs) {
@@ -46,6 +48,10 @@ export class Sampler<T, Sample> {
     const decision = this.deliver(frame, sample, this.firstTimestampMs);
     this.metrics.record(decision, preparationMs + (this.now() - startedAt));
     return decision;
+  }
+
+  get lastDeliveredAtMs(): number | null {
+    return this.deliveredAtMs;
   }
 
   snapshot(): MetricsSnapshot {
@@ -64,19 +70,20 @@ export class Sampler<T, Sample> {
         return 'interval';
       }
     }
-    if (!this.budget.canSend(timestampMs)) {
-      return 'budget';
-    }
-    if (this.admission && !this.admission.canSend(timestampMs, this.deliveryBytes)) {
-      return 'budget';
-    }
-    if (!this.sink.accept(frame)) {
-      return 'backpressure';
-    }
+    const reservation = this.admission.reserveRealtime(this.deliveryClock?.() ?? timestampMs, this.deliveryBytes);
+    if (!reservation) return 'budget';
 
-    this.budget.recordDelivery(timestampMs);
-    this.admission?.record(timestampMs, this.deliveryBytes);
-    this.lastDelivery = { timestampMs, sample };
-    return 'sent';
+    this.delivering = true;
+    try {
+      if (!this.sink.accept(frame)) return 'backpressure';
+      const deliveredAtMs = this.deliveryClock?.() ?? timestampMs;
+      reservation.commit(deliveredAtMs);
+      this.deliveredAtMs = deliveredAtMs;
+      this.lastDelivery = { timestampMs, sample };
+      return 'sent';
+    } finally {
+      reservation.release();
+      this.delivering = false;
+    }
   }
 }

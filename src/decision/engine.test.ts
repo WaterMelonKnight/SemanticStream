@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DecisionEngine, DecisionScheduler } from './engine';
 import type { DecisionProvider, DecisionProviderResult, DecisionState } from './types';
 
@@ -77,11 +77,124 @@ describe('decision engine', () => {
       decide: () => { calls += 1; return result('SEND_FRAME'); },
     };
     const engine = new DecisionEngine(provider, fallback, { timeoutMs: 50, now: () => 0 });
-    const scheduler = new DecisionScheduler(engine, 100);
+    const scheduler = new DecisionScheduler(engine, 100, 200, () => 100);
     await scheduler.evaluate(state(0));
     await scheduler.evaluate(state(50));
     expect(calls).toBe(1);
     await scheduler.evaluate(state(100));
     expect(calls).toBe(2);
+  });
+});
+
+function deferredProvider() {
+  const calls: Array<{ resolve: (value: DecisionProviderResult) => void; signal?: AbortSignal }> = [];
+  const provider: DecisionProvider = {
+    id: 'controlled',
+    scoreKind: 'heuristic',
+    decide: (_state, signal) => new Promise((resolve) => calls.push({ resolve, signal })),
+  };
+  return { calls, provider };
+}
+
+describe('decision lifecycle regressions', () => {
+  it('does not start overlapping evaluations for an unchanged task', async () => {
+    const { calls, provider } = deferredProvider();
+    const scheduler = new DecisionScheduler(new DecisionEngine(provider, fallback), 100, 200, () => 100);
+    const older = scheduler.evaluate(state(0));
+    const newer = scheduler.evaluate(state(100));
+    expect(calls).toHaveLength(1);
+    calls[0].resolve(result('SEND_FRAME'));
+    await older;
+    await newer;
+    expect(scheduler.latest?.action).toBe('SEND_FRAME');
+  });
+
+  it.each(['session', 'roi'])('ignores a late response after changing %s', async (changed) => {
+    const { calls, provider } = deferredProvider();
+    const scheduler = new DecisionScheduler(new DecisionEngine(provider, fallback), 100, 200, () => 100);
+    const initial = state(0);
+    const old = scheduler.evaluate(initial);
+    const next = changed === 'session'
+      ? { ...initial, sessionId: 'next' }
+      : { ...initial, task: { ...initial.task, roi: { x: 0, y: 0, width: 1, height: 1 } } };
+    const current = scheduler.evaluate({ ...next, timestampMs: 100 });
+    calls[1].resolve(result('DROP'));
+    await current;
+    calls[0].resolve(result('SEND_FRAME'));
+    await old;
+    expect(calls[0].signal?.aborted).toBe(true);
+    expect(scheduler.latest?.action).toBe('DROP');
+  });
+
+  it('rejects malformed candidate metadata from both providers', async () => {
+    const invalid: DecisionProvider = {
+      ...fallback,
+      decide: () => ({ ...result('SEND_FRAME'), candidates: [{ ...result('SEND_FRAME').candidates[0], score: NaN }] }),
+    };
+    const decision = await new DecisionEngine(invalid, invalid).decide(state());
+    expect(decision.action).toBe('WAIT');
+    expect(decision.degraded).toBe(true);
+  });
+});
+
+afterEach(() => vi.useRealTimers());
+
+describe('provider supervision', () => {
+  it('gives fallback its own signal and deadline and bounds providers that ignore abort', async () => {
+    vi.useFakeTimers();
+    const primary = deferredProvider();
+    const backup = deferredProvider();
+    const engine = new DecisionEngine(primary.provider, backup.provider, {
+      timeoutMs: 10, maxUnsettledPerProvider: 1,
+    });
+
+    const first = engine.decide(state());
+    await vi.advanceTimersByTimeAsync(10);
+    expect(primary.calls[0].signal?.aborted).toBe(true);
+    expect(backup.calls[0].signal?.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(backup.calls[0].signal?.aborted).toBe(true);
+    expect(await first).toMatchObject({ providerId: 'safe-wait', action: 'WAIT', degraded: true });
+
+    const overloaded = await engine.decide(state());
+    expect(overloaded.reason).toContain('capacity exhausted');
+    expect(primary.calls).toHaveLength(1);
+    expect(backup.calls).toHaveLength(1);
+
+    primary.calls[0].resolve(result('SEND_FRAME'));
+    await Promise.resolve();
+    const recovered = engine.decide(state());
+    primary.calls[1].resolve(result('DROP'));
+    expect(await recovered).toMatchObject({ action: 'DROP', degraded: false });
+  });
+
+  it('returns promptly on cancellation and skips fallback even if the primary ignores abort', async () => {
+    const primary = deferredProvider();
+    const backup = deferredProvider();
+    const engine = new DecisionEngine(primary.provider, backup.provider);
+    const lifetime = new AbortController();
+    const decision = engine.decide(state(), lifetime.signal);
+    lifetime.abort();
+    await expect(decision).rejects.toMatchObject({ name: 'AbortError' });
+    expect(primary.calls[0].signal?.aborted).toBe(true);
+    primary.calls[0].resolve(result('SEND_FRAME'));
+    expect(backup.calls).toHaveLength(0);
+  });
+
+  it('accepts a bounded-age result over newer same-context observations, then expires it', async () => {
+    let now = 0;
+    const { provider, calls } = deferredProvider();
+    const clock = () => now;
+    const engine = new DecisionEngine(provider, fallback, { now: clock, timeoutMs: 100 });
+    const scheduler = new DecisionScheduler(engine, 100, 200, clock);
+    const pending = scheduler.evaluate(state(now));
+    now = 50;
+    expect(await scheduler.evaluate(state(now))).toBeNull();
+    calls[0].resolve(result('SEND_FRAME'));
+    expect(await pending).toMatchObject({ requestId: 1, observationVersion: 1, observedAtMs: 0, completedAtMs: 50 });
+    expect(scheduler.applicable(200)?.action).toBe('SEND_FRAME');
+    expect(scheduler.applicable(201)).toBeNull();
+    scheduler.invalidateContext();
+    expect(scheduler.applicable(50)).toBeNull();
   });
 });

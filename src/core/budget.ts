@@ -1,34 +1,19 @@
-export class BudgetController {
-  private readonly deliveries: number[] = [];
-  private frameLimit: number;
+import { RollingResourceBudget } from './resource-budget';
+import type { ResourceReservation } from './resource-budget';
 
-  constructor(private readonly windowMs: number, frameLimit: number) {
-    if (!Number.isFinite(windowMs) || windowMs <= 0) {
-      throw new RangeError('Budget window must be positive and finite.');
-    }
-    this.frameLimit = BudgetController.validateLimit(frameLimit);
+/** Frame-only admission for an independent comparison strategy. */
+export class BudgetController {
+  private readonly budget: RollingResourceBudget;
+
+  constructor(windowMs: number, frameLimit: number) {
+    this.budget = new RollingResourceBudget({ windowMs, maxFrames: frameLimit, maxBytes: 1 });
   }
 
   setLimit(frameLimit: number): void {
-    this.frameLimit = BudgetController.validateLimit(frameLimit);
+    this.budget.setLimits({ ...this.budget.limits, maxFrames: frameLimit });
   }
 
-  canSend(timestampMs: number): boolean {
-    while (this.deliveries.length && timestampMs >= this.deliveries[0] + this.windowMs) {
-      this.deliveries.shift();
-    }
-    return this.deliveries.length < this.frameLimit;
-  }
-
-  /** Record only after canSend and synchronous sink acceptance. */
-  recordDelivery(timestampMs: number): void {
-    this.deliveries.push(timestampMs);
-  }
-
-  private static validateLimit(frameLimit: number): number {
-    if (!Number.isSafeInteger(frameLimit) || frameLimit < 1) {
-      throw new RangeError('Frame limit must be a positive integer.');
-    }
-    return frameLimit;
+  reserveRealtime(timestampMs: number): ResourceReservation | null {
+    return this.budget.reserve(timestampMs, 1, 0);
   }
 }

@@ -15,10 +15,10 @@ const resultsDirectory = resolve(process.cwd(), 'benchmarks/results');
 const publicDirectory = resolve(process.cwd(), 'public/benchmark');
 mkdirSync(resultsDirectory, { recursive: true });
 mkdirSync(publicDirectory, { recursive: true });
-writeFileSync(resolve(resultsDirectory, 'phase3.json'), json);
-writeFileSync(resolve(resultsDirectory, 'phase3.csv'), csv);
-writeFileSync(resolve(resultsDirectory, 'phase3.md'), markdown);
-writeFileSync(resolve(publicDirectory, 'phase3.json'), json);
+writeFileSync(resolve(resultsDirectory, 'phase3a-corrected.json'), json);
+writeFileSync(resolve(resultsDirectory, 'phase3a-corrected.csv'), csv);
+writeFileSync(resolve(resultsDirectory, 'phase3a-corrected.md'), markdown);
+writeFileSync(resolve(publicDirectory, 'phase3a-corrected.json'), json);
 
 function printAggregates(title: string, aggregates: readonly TaskAggregate[]): void {
   console.log(title);
@@ -36,6 +36,6 @@ function printAggregates(title: string, aggregates: readonly TaskAggregate[]): v
   }
 }
 
-console.log(`SemanticStream Phase 3A task-aware benchmark (${report.suites.evaluation.scenes.length} evaluation scenes)`);
+console.log(`SemanticStream Phase 3A task-aware benchmark, corrected (${report.suites.evaluation.scenes.length} evaluation scenes)`);
 printAggregates('Held-out evaluation:', report.suites.evaluation.aggregates);
-console.log(`Wrote ${resultsDirectory}/phase3.{json,csv,md} and ${publicDirectory}/phase3.json`);
+console.log(`Wrote ${resultsDirectory}/phase3a-corrected.{json,csv,md} and ${publicDirectory}/phase3a-corrected.json`);

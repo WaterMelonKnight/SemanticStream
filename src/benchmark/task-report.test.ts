@@ -5,7 +5,7 @@ import { runTaskBenchmark } from './task-runner';
 describe('task-aware benchmark report', () => {
   it('compares baselines and task-aware decisions under shared budgets', async () => {
     const report = await runTaskBenchmark();
-    expect(report.phase).toBe('3A');
+    expect(report.phase).toBe('3A-corrected');
     expect(report.suites.evaluation.scenes).toHaveLength(9);
     expect(report.suites.evaluation.aggregates).toHaveLength(4);
     for (const aggregate of report.suites.evaluation.aggregates) {

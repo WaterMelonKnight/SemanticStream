@@ -2,7 +2,7 @@
 
 **Less data. More understanding.**
 
-SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 added a bounded history buffer and active retrieval. Phase 3A adds a task-aware, pluggable decision boundary while keeping the same local-only runtime.
+SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 added a bounded history buffer and active retrieval. Phase 3A adds a task-aware, pluggable decision boundary. Phase 3R hardens session lifetimes, resource admission and replay while keeping the browser demo local. See the [Phase 3R audit](docs/architecture-audit-phase3r.md) and [runtime architecture](docs/runtime-architecture-v2.md).
 
 Everything runs locally in the browser or in Node.js. The selected video is read through a local Object URL and drawn to Canvas; no video or frame is uploaded. The project requires no GPU, backend, database, model API, or paid service.
 
@@ -44,7 +44,7 @@ getFramesBetween(sessionId, startMs, endMs, { maxFrames })
 getRegion(sessionId, {sequence} | {timestampMs}, {x, y, width, height})
 ```
 
-Results distinguish `available`, `partial`, `evicted`, `not-yet-captured`, `nonexistent`, `wrong-session`, `invalid-range`, `region-invalid`, `budget-denied`, and `disposed`. Every response carries the session ID, requested timestamp, latency, available range, captured range, and budget snapshot.
+Results distinguish `available`, `partial`, `evicted`, `not-yet-captured`, `nonexistent`, `wrong-session`, `invalid-range`, `region-invalid`, `budget-denied`, and `disposed`. Every response carries the session ID, request start and completion, delivery time on success, latency, available range, captured range, and budget snapshot.
 
 ### Retrieval budget
 
@@ -52,9 +52,8 @@ Retrieval has its own rolling budget and shares a combined ledger with real-time
 
 - Retrieval: **6 frames and 2 MB / 5 s**.
 - Combined real-time + retrieval: **26 frames and 4 MB / 5 s**.
-- Real-time sampler: the existing **20 frames / 5 s** cap.
 
-Real-time adaptive sends and retrieval both pass a single ex-ante `ResourceAdmissionController`. It checks the relevant independent sub-budget and the combined total before the sink or buffer returns data. A denied send does not charge the sampler budget; a denied retrieval does not charge the retrieval budget. The benchmark independently audits all three limits.
+Real-time adaptive sends and retrieval both pass a single ex-ante `ResourceAdmissionController`. It reserves capacity in the relevant sub-budget and combined total before delivery, commits on acceptance and releases on refusal. The fixed live comparison uses an independent ledger. The benchmark independently audits all three limits.
 
 ## Live retrieval demo
 
@@ -75,17 +74,17 @@ Phase 3A adds a task-aware decision layer above the sampler:
 - A typed `DecisionState` with task category, declared ROI, global/local/ROI change, repeated-change counters, remaining real-time/retrieval/total budget, cache range, and recent decisions.
 - A finite action space: `SEND_FRAME`, `SEND_PREVIEW`, `DROP`, `WAIT`, `REQUEST_HISTORY`, `REQUEST_REGION`, `ESCALATE`.
 - A pluggable `DecisionProvider` with mandatory score provenance. `RuleBasedDecisionProvider` returns heuristic weights; it does not pretend they are calibrated probabilities.
-- A timeout and deterministic fallback path. Invalid actions are rejected before any effect.
+- Separate primary and fallback deadlines, validated proposals, cancellation across session or task changes, and a deterministic WAIT when both providers fail.
 - A 100 ms decision interval so expensive model calls are never made on every frame. The shared sampler still owns budget, spacing, and silence refresh.
 - No provider can mutate resource budgets or bypass admission.
 
-The live page lets you choose a task, edit a custom ROI, inspect the decision log, and see remaining budget. The same provider is advisory by default; selecting **Task-aware (live gate)** makes its `SEND_FRAME`/`SEND_PREVIEW` decision gate the adaptive sampler's next send. Retrieval actions are executed by the Phase 3A benchmark, not by the live preview. The shared sampler still applies its budget, interval, and silence refresh.
+The live page lets you choose a task, edit a custom ROI, inspect the decision log, and see remaining budget. The same provider is advisory by default; selecting **Task-aware (live gate)** lets an applicable `SEND_FRAME`/`SEND_PREVIEW` proposal permit a discretionary adaptive send. History and region proposals execute in the corrected replay. In the browser, users request history and crops through the timeline. The shared sampler still applies its budget, interval, and silence refresh.
 
 See [docs/decision-model-integration.md](docs/decision-model-integration.md) for the Laya, AnyJev, Jev API, generic structured-output, and local-classifier adapter design, calibration requirements, latency budgets, degradation, and safety boundaries. Phase 3A ships no model, GPU work, paid API, or network provider.
 
 ## Deterministic benchmark
 
-`npm run benchmark` runs the Phase 1B event benchmark, the Phase 2 retrieval benchmark, and the Phase 3A task-aware benchmark. All three reuse the same deterministic 30 fps, 96 × 54 replay fixtures where applicable.
+`npm run benchmark` runs the Phase 1B event benchmark and the corrected Phase 2 and Phase 3A replays. All three reuse the same deterministic 30 fps, 96 × 54 replay fixtures where applicable.
 
 Phase 2 compares:
 
@@ -113,12 +112,13 @@ The key Phase 1B failure was `eval-motion-text`: irrelevant background motion ex
 
 Results are written to:
 
-- `benchmarks/results/latest.json`, `latest.csv`, `latest.md` — Phase 1B.
-- `benchmarks/results/phase2.json`, `phase2.csv`, `phase2.md` — Phase 2.
-- `benchmarks/results/phase3.json`, `phase3.csv`, `phase3.md` — Phase 3A.
-- `public/benchmark/latest.json`, `public/benchmark/phase2.json`, and `public/benchmark/phase3.json` — used by the page.
+- `benchmarks/results/phase1b-replay.{json,csv,md}` holds fresh local Phase 1B results, including wall-clock processing diagnostics.
+- `benchmarks/results/phase2-corrected.{json,csv,md}` and `benchmarks/results/phase3a-corrected.{json,csv,md}` hold the versioned corrected replays.
+- Historical Phase 1B (`latest.*`), Phase 2 (`phase2.*`) and Phase 3A (`phase3.*`) reports are preserved in `benchmarks/results/`. The page loads the historical Phase 1B summary and both corrected summaries from `public/benchmark/`.
 
-### Phase 3A held-out evaluation
+The corrected replay uses captured evidence for spatial coverage, delivery before event end for deadline coverage, and delivery time for rolling spend. Simulated provider and retrieval durations come from the replay clock. See the [benchmark comparison](docs/architecture-audit-phase3r.md#corrected-results).
+
+### Historical Phase 3A held-out evaluation
 
 Phase 3A adds 9 held-out scenes: the original 6 plus deterministic task-ROI, repeated-event, and overlapping-event scenes. It compares A, B, C, and **D · Task-aware Rule Decision** under the same total frames/bytes budget, cache bounds, and time constraints. Task ROI is authored per scene; evaluator event regions are not used to create the ROI at decision time.
 
@@ -131,7 +131,7 @@ Phase 3A adds 9 held-out scenes: the original 6 plus deterministic task-ROI, rep
 
 D sends fewer total frames than B or C and improves its own real-time recall after retrieval, but it is not uniformly better: C reaches 100% overall and ROI recall on this held-out suite, while D misses some events. The benchmark reports the loss rather than hiding it. The decision score is a heuristic weight, not a calibrated model probability.
 
-Recall means a delivered or retrieved frame timestamp falls inside a labeled event window. It does not measure whether a model understood the event. Uncaptured events cannot be recovered. The buffer is short-lived; frames evicted before a request are returned as `evicted`. Task ROI recall is a separate metric over events whose annotated region intersects the authored task ROI.
+The historical recall uses the capture timestamp of each delivered or retrieved frame against the labeled event window. The corrected replay also checks the delivered crop footprint. Uncaptured events cannot be recovered. The buffer is short-lived; frames evicted before a request are returned as `evicted`. Task ROI recall is a separate metric over events whose annotated region intersects the authored task ROI.
 
 ## Verify and build
 

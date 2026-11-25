@@ -1,10 +1,13 @@
 import { ActiveRetrievalService } from '../core/active-retrieval';
-import { BudgetController } from '../core/budget';
 import { ContextBuffer } from '../core/context-buffer';
 import type { PixelSample, SamplingPolicy } from '../core/sampling';
 import { SAMPLE_HEIGHT, SAMPLE_WIDTH } from '../core/sample';
 import { Sampler } from '../core/sampler';
 import type { StreamFrame } from '../core/stream';
+import { proposesRealtimeDelivery } from '../decision/actions';
+import { aggregateEvidenceTiming, countResourceViolations, evaluateEvidence } from './evidence';
+import type { EvidenceDelivery } from './evidence';
+import { decisionBudget, decisionCache } from '../decision/snapshot';
 import { DecisionEngine } from '../decision/engine';
 import { DecisionFeatureExtractor } from '../decision/features';
 import { RuleBasedDecisionProvider } from '../decision/rule-provider';
@@ -14,8 +17,6 @@ import {
   BENCHMARK_BUDGET_WINDOW_MS,
   BENCHMARK_TIMING,
   BENCHMARK_DEFAULT_LOCAL,
-  countBudgetViolations,
-  evaluateScene,
 } from './runner';
 import {
   PHASE2_BUFFER_MAX_AGE_MS,
@@ -24,13 +25,14 @@ import {
   PHASE2_RETRIEVAL_MAX_BYTES,
   PHASE2_RETRIEVAL_MAX_FRAMES,
   PHASE2_SAMPLE_BYTES,
+  PHASE2_REALTIME_MAX_BYTES,
   PHASE2_TOTAL_MAX_BYTES,
   PHASE2_TOTAL_MAX_FRAMES,
   runPhase2StrategyOnScene,
 } from './retrieval-runner';
 import { getTaskScenes, getTaskForScene } from './task-fixtures';
 import type { TaskAggregate, TaskConfig, TaskReport, TaskSceneResult, TaskSceneSummary, TaskSuiteResult } from './task-types';
-import { emptyActionCounts, taskConfigFor, taskResultFromPhase2 } from './task-types';
+import { emptyActionCounts, PHASE3_SCHEMA_VERSION, taskConfigFor, taskResultFromPhase2 } from './task-types';
 import { getScenes } from './fixtures';
 import type { BenchmarkScene } from './types';
 
@@ -42,12 +44,6 @@ export const TASK_STRATEGIES = [
   { id: 'task-aware', label: 'D · Task-aware Rule Decision', baseline: false },
 ] as const;
 
-interface Delivery {
-  readonly sequence: number;
-  readonly timestampMs: number;
-  readonly bytes: number;
-}
-
 const FULL_FRAME = { x: 0, y: 0, width: SAMPLE_WIDTH, height: SAMPLE_HEIGHT };
 
 class GatePolicy implements SamplingPolicy<PixelSample> {
@@ -55,16 +51,6 @@ class GatePolicy implements SamplingPolicy<PixelSample> {
   wantsFrame(): boolean {
     return this.allow;
   }
-}
-
-function intersects(
-  region: { x: number; y: number; width: number; height: number },
-  roi: { x: number; y: number; width: number; height: number },
-): boolean {
-  return region.x < roi.x + roi.width
-    && region.x + region.width > roi.x
-    && region.y < roi.y + roi.height
-    && region.y + region.height > roi.y;
 }
 
 function hashString(value: string): string {
@@ -86,51 +72,8 @@ function percentile(values: readonly number[], fraction: number): number {
   return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * fraction) - 1))];
 }
 
-function countResourceViolations(
-  events: readonly { timestampMs: number; bytes: number }[],
-  maxFrames: number,
-  maxBytes: number,
-  windowMs: number,
-): number {
-  const recent: Array<{ timestampMs: number; bytes: number }> = [];
-  let violations = 0;
-  for (const event of [...events].sort((left, right) => left.timestampMs - right.timestampMs)) {
-    while (recent.length && event.timestampMs >= recent[0].timestampMs + windowMs) recent.shift();
-    const bytes = recent.reduce((total, entry) => total + entry.bytes, 0);
-    if (recent.length + 1 > maxFrames || bytes + event.bytes > maxBytes) violations += 1;
-    recent.push({ timestampMs: event.timestampMs, bytes: event.bytes });
-  }
-  return violations;
-}
-
 function taskConfig(task: TaskDefinition): TaskConfig {
   return taskConfigFor(task);
-}
-
-function budgetState(service: ActiveRetrievalService, timestampMs: number): DecisionState['budget'] {
-  const snapshot = service.admission.snapshot(timestampMs);
-  return {
-    realtimeRemainingFrames: Math.max(0, snapshot.realtime.maxFrames - snapshot.realtime.usedFrames),
-    realtimeRemainingBytes: Math.max(0, snapshot.realtime.maxBytes - snapshot.realtime.usedBytes),
-    retrievalRemainingFrames: Math.max(0, snapshot.retrieval.maxFrames - snapshot.retrieval.usedFrames),
-    retrievalRemainingBytes: Math.max(0, snapshot.retrieval.maxBytes - snapshot.retrieval.usedBytes),
-    totalRemainingFrames: Math.max(0, snapshot.total.maxFrames - snapshot.total.usedFrames),
-    totalRemainingBytes: Math.max(0, snapshot.total.maxBytes - snapshot.total.usedBytes),
-  };
-}
-
-function cacheState(buffer: ContextBuffer): DecisionState['cache'] {
-  const stats = buffer.stats();
-  return {
-    availableRange: stats.oldestTimestampMs === null
-      ? null
-      : { startMs: stats.oldestTimestampMs, endMs: stats.latestTimestampMs ?? stats.oldestTimestampMs },
-    capturedRange: stats.firstCapturedTimestampMs === null
-      ? null
-      : { startMs: stats.firstCapturedTimestampMs, endMs: stats.lastCapturedTimestampMs ?? stats.firstCapturedTimestampMs },
-    frameCount: stats.frameCount,
-    byteCount: stats.byteCount,
-  };
 }
 
 export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskSceneResult> {
@@ -153,12 +96,12 @@ export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskScen
   const gate = new GatePolicy();
   const sampler = new Sampler<null, PixelSample>(
     gate,
-    new BudgetController(BENCHMARK_BUDGET_WINDOW_MS, BENCHMARK_FRAME_LIMIT),
+    service.admission,
     BENCHMARK_TIMING,
     { accept: () => true },
     undefined,
-    service.admission,
     PHASE2_SAMPLE_BYTES,
+    () => replayClock.now,
   );
   const provider = new RuleBasedDecisionProvider({
     globalThreshold: 1.5,
@@ -167,7 +110,7 @@ export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskScen
     repeatSuppressionCount: 3,
     lowRealtimeFrames: 2,
   });
-  const engine = new DecisionEngine(provider, provider, { timeoutMs: 50 });
+  const engine = new DecisionEngine(provider, provider, { timeoutMs: 50, now: () => replayClock.now });
   const extractor = new DecisionFeatureExtractor({
     sampleWidth: SAMPLE_WIDTH,
     sampleHeight: SAMPLE_HEIGHT,
@@ -176,8 +119,8 @@ export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskScen
     blockThreshold: BENCHMARK_DEFAULT_LOCAL.threshold,
     minChangedBlocks: BENCHMARK_DEFAULT_LOCAL.minChangedBlocks,
   });
-  const realtimeDeliveries: Delivery[] = [];
-  const retrievalDeliveries: Delivery[] = [];
+  const realtimeDeliveries: EvidenceDelivery[] = [];
+  const retrievalDeliveries: EvidenceDelivery[] = [];
   const decisionLatencies: number[] = [];
   const retrievalLatencies: number[] = [];
   const actions = emptyActionCounts();
@@ -238,41 +181,41 @@ export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskScen
           budgetDeniedCount,
           recentDecisions: [...recentDecisions],
         },
-        budget: budgetState(service, replayFrame.timestampMs),
-        cache: cacheState(buffer),
+        budget: decisionBudget(service.admission.snapshot(replayClock.now)),
+        cache: decisionCache(buffer.stats()),
       };
-      const startedAt = performance.now();
       const decision = await engine.decide(state);
-      decisionLatencies.push(performance.now() - startedAt);
+      decisionLatencies.push(decision.latencyMs);
       decisionRequests += 1;
       if (decision.degraded) decisionFallbacks += 1;
       actions[decision.action] += 1;
       recentDecisions.push({ timestampMs: replayFrame.timestampMs, action: decision.action, reason: decision.reason });
       if (recentDecisions.length > 20) recentDecisions.shift();
       decisionDigestParts.push(`${replayFrame.timestampMs}:${decision.action}`);
-      gate.allow = decision.action === 'SEND_FRAME' || decision.action === 'SEND_PREVIEW';
+      gate.allow = proposesRealtimeDelivery(decision.action);
 
-      if (decision.action === 'REQUEST_HISTORY' || decision.action === 'ESCALATE') {
-        const requestStarted = performance.now();
+      if (decision.action === 'REQUEST_HISTORY') {
         const target = Math.max(0, replayFrame.timestampMs - 250);
         const response = service.getFrameAtTimestamp(sessionId, target, 150);
-        retrievalLatencies.push(performance.now() - requestStarted);
-        if (response.status === 'available' && response.frame) {
+        retrievalLatencies.push(response.latencyMs);
+        if (response.status === 'available' && response.frame && response.deliveredAtMs !== null) {
           retrievalDeliveries.push({
             sequence: response.frame.sequence,
-            timestampMs: response.frame.timestampMs,
+            capturedAtMs: response.frame.timestampMs,
+            deliveredAtMs: response.deliveredAtMs,
             bytes: response.bytes,
           });
           retrievalBytes += response.bytes;
         }
       } else if (decision.action === 'REQUEST_REGION') {
-        const requestStarted = performance.now();
         const response = service.getRegion(sessionId, { timestampMs: replayFrame.timestampMs }, task.roi ?? FULL_FRAME);
-        retrievalLatencies.push(performance.now() - requestStarted);
-        if (response.status === 'available' && response.sourceFrame) {
+        retrievalLatencies.push(response.latencyMs);
+        if (response.status === 'available' && response.sourceFrame && response.deliveredAtMs !== null) {
           retrievalDeliveries.push({
             sequence: response.sourceFrame.sequence,
-            timestampMs: response.sourceFrame.timestampMs,
+            capturedAtMs: response.sourceFrame.timestampMs,
+            deliveredAtMs: response.deliveredAtMs,
+            region: response.region,
             bytes: response.bytes,
           });
           retrievalBytes += response.bytes;
@@ -287,7 +230,10 @@ export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskScen
     };
     const decision = sampler.process(frame, replayFrame.sample, 0);
     if (decision === 'sent') {
-      realtimeDeliveries.push({ sequence: replayFrame.sequence, timestampMs: replayFrame.timestampMs, bytes: PHASE2_SAMPLE_BYTES });
+      realtimeDeliveries.push({
+        sequence: replayFrame.sequence, capturedAtMs: replayFrame.timestampMs,
+        deliveredAtMs: sampler.lastDeliveredAtMs!, bytes: PHASE2_SAMPLE_BYTES,
+      });
       realtimeBytes += PHASE2_SAMPLE_BYTES;
       lastAccepted = replayFrame.sample;
     } else if (decision === 'budget') {
@@ -296,19 +242,10 @@ export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskScen
     gate.allow = false;
   }
 
-  const realtimeEvaluation = evaluateScene(scene, realtimeDeliveries, []);
-  const combinedEvaluation = evaluateScene(scene, [...realtimeDeliveries, ...retrievalDeliveries], []);
-  const observable = scene.events.filter((event) =>
-    scene.frames.some((frame) => frame.timestampMs >= event.startMs && frame.timestampMs < event.endMs));
-  const roiEvents = task.roi ? observable.filter((event) => intersects(event.region, task.roi!)) : [];
-  const missedBefore = new Set(realtimeEvaluation.missedEventIds);
-  const missedAfter = new Set(combinedEvaluation.missedEventIds);
-  const capturedBefore = observable.filter((event) => !missedBefore.has(event.id));
-  const capturedAfter = observable.filter((event) => !missedAfter.has(event.id));
-  const roiCapturedBefore = roiEvents.filter((event) => !missedBefore.has(event.id));
-  const roiCapturedAfter = roiEvents.filter((event) => !missedAfter.has(event.id));
-  const realtimeEvents = realtimeDeliveries.map((delivery) => ({ timestampMs: delivery.timestampMs, bytes: delivery.bytes }));
-  const retrievalEvents = retrievalDeliveries.map((delivery) => ({ timestampMs: delivery.timestampMs, bytes: delivery.bytes }));
+  const realtimeEvaluation = evaluateEvidence(scene, realtimeDeliveries);
+  const combinedEvaluation = evaluateEvidence(scene, realtimeDeliveries, retrievalDeliveries);
+  const roiRealtime = task.roi ? evaluateEvidence(scene, realtimeDeliveries, [], task.roi) : null;
+  const roiCombined = task.roi ? evaluateEvidence(scene, realtimeDeliveries, retrievalDeliveries, task.roi) : null;
   const serviceStats = service.stats();
   const bufferStats = buffer.stats();
   const result: TaskSceneResult = {
@@ -319,36 +256,38 @@ export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskScen
     strategyLabel: 'D · Task-aware Rule Decision',
     task: taskConfig(task),
     inputs: scene.frames.length,
-    observableEvents: observable.length,
-    roiObservableEvents: roiEvents.length,
+    observableEvents: realtimeEvaluation.observableEvents,
+    roiObservableEvents: roiRealtime?.observableEvents ?? 0,
     realtimeSent: realtimeDeliveries.length,
     retrievalFrames: retrievalDeliveries.length,
     retrievalBytes,
     totalSent: realtimeDeliveries.length + retrievalDeliveries.length,
     totalBytes: realtimeBytes + retrievalBytes,
-    realtimeCapturedEvents: capturedBefore.length,
-    realtimeRecall: observable.length ? capturedBefore.length / observable.length : 0,
-    postCapturedEvents: capturedAfter.length,
-    postRetrievalRecall: observable.length ? capturedAfter.length / observable.length : 0,
-    roiRealtimeCapturedEvents: roiCapturedBefore.length,
-    roiRealtimeRecall: roiEvents.length ? roiCapturedBefore.length / roiEvents.length : 0,
-    roiPostCapturedEvents: roiCapturedAfter.length,
-    roiPostRetrievalRecall: roiEvents.length ? roiCapturedAfter.length / roiEvents.length : 0,
+    realtimeCapturedEvents: realtimeEvaluation.capturedEvents,
+    realtimeRecall: realtimeEvaluation.recall,
+    postCapturedEvents: combinedEvaluation.capturedEvents,
+    postRetrievalRecall: combinedEvaluation.recall,
+    roiRealtimeCapturedEvents: roiRealtime?.capturedEvents ?? 0,
+    roiRealtimeRecall: roiRealtime?.recall ?? 0,
+    roiPostCapturedEvents: roiCombined?.capturedEvents ?? 0,
+    roiPostRetrievalRecall: roiCombined?.recall ?? 0,
     missedBefore: realtimeEvaluation.missedEvents,
     missedAfter: combinedEvaluation.missedEvents,
-    roiMissedBefore: roiEvents.length - roiCapturedBefore.length,
-    roiMissedAfter: roiEvents.length - roiCapturedAfter.length,
+    roiMissedBefore: roiRealtime?.missedEvents ?? 0,
+    roiMissedAfter: roiCombined?.missedEvents ?? 0,
     realtimeFirstCaptureLatencyMs: realtimeEvaluation.meanFirstCaptureLatencyMs,
     postFirstCaptureLatencyMs: combinedEvaluation.meanFirstCaptureLatencyMs,
+    evidenceTiming: combinedEvaluation.timing,
+    retrievalAvailable: serviceStats.available + serviceStats.partial,
     retrievalRequests: serviceStats.requests,
     retrievalDenied: serviceStats.budgetDenied,
     retrievalLatencyMeanMs: retrievalLatencies.length ? mean(retrievalLatencies) : null,
     peakCacheBytes,
     peakCacheFrames,
     evictions: bufferStats.evictionCount,
-    realtimeBudgetViolations: countBudgetViolations(realtimeDeliveries.map((delivery) => delivery.timestampMs), BENCHMARK_FRAME_LIMIT, BENCHMARK_BUDGET_WINDOW_MS),
-    retrievalBudgetViolations: countResourceViolations(retrievalEvents, PHASE2_RETRIEVAL_MAX_FRAMES, PHASE2_RETRIEVAL_MAX_BYTES, 5_000),
-    totalBudgetViolations: countResourceViolations([...realtimeEvents, ...retrievalEvents], PHASE2_TOTAL_MAX_FRAMES, PHASE2_TOTAL_MAX_BYTES, 5_000),
+    realtimeBudgetViolations: countResourceViolations(realtimeDeliveries, BENCHMARK_FRAME_LIMIT, PHASE2_REALTIME_MAX_BYTES, BENCHMARK_BUDGET_WINDOW_MS),
+    retrievalBudgetViolations: countResourceViolations(retrievalDeliveries, PHASE2_RETRIEVAL_MAX_FRAMES, PHASE2_RETRIEVAL_MAX_BYTES, 5_000),
+    totalBudgetViolations: countResourceViolations([...realtimeDeliveries, ...retrievalDeliveries], PHASE2_TOTAL_MAX_FRAMES, PHASE2_TOTAL_MAX_BYTES, 5_000),
     decisionRequests,
     decisionFallbacks,
     decisionLatencyMeanMs: decisionLatencies.length ? mean(decisionLatencies) : null,
@@ -409,6 +348,8 @@ export function aggregateTaskResults(results: readonly TaskSceneResult[], strate
     roiPostRetrievalRecall: roiObservable ? roiPostCaptured / roiObservable : 0,
     missedBefore: sum('missedBefore'),
     missedAfter: sum('missedAfter'),
+    evidenceTiming: aggregateEvidenceTiming(selected),
+    retrievalAvailable: sum('retrievalAvailable'),
     retrievalRequests,
     retrievalDenied: sum('retrievalDenied'),
     retrievalLatencyMeanMs: retrievalRequests ? retrievalLatencyTotal / retrievalRequests : null,
@@ -454,8 +395,8 @@ export async function runTaskBenchmark(): Promise<TaskReport> {
     aggregates: TASK_STRATEGIES.map((strategy) => aggregateTaskResults(results, strategy.id)),
   };
   return {
-    schemaVersion: 3,
-    phase: '3A',
+    schemaVersion: PHASE3_SCHEMA_VERSION,
+    phase: '3A-corrected',
     configuration: {
       sampleWidth: SAMPLE_WIDTH,
       sampleHeight: SAMPLE_HEIGHT,
