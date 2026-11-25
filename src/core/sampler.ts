@@ -2,6 +2,7 @@ import type { BudgetController } from './budget';
 import { MetricsCollector } from './metrics';
 import type { FrameDecision, MetricsSnapshot } from './metrics';
 import type { SamplingContext, SamplingPolicy } from './sampling';
+import type { DeliveryAdmission } from './resource-admission';
 import type { ContextSink, StreamFrame } from './stream';
 
 export interface DeliveryTiming {
@@ -23,6 +24,8 @@ export class Sampler<T, Sample> {
     private readonly timing: DeliveryTiming,
     private readonly sink: ContextSink<T>,
     private readonly now: () => number = () => performance.now(),
+    private readonly admission?: DeliveryAdmission,
+    private readonly deliveryBytes = 0,
   ) {
     if (!Number.isFinite(timing.minimumIntervalMs) || timing.minimumIntervalMs < 0
       || !Number.isFinite(timing.maximumSilenceMs) || timing.maximumSilenceMs <= 0) {
@@ -64,11 +67,15 @@ export class Sampler<T, Sample> {
     if (!this.budget.canSend(timestampMs)) {
       return 'budget';
     }
+    if (this.admission && !this.admission.canSend(timestampMs, this.deliveryBytes)) {
+      return 'budget';
+    }
     if (!this.sink.accept(frame)) {
       return 'backpressure';
     }
 
     this.budget.recordDelivery(timestampMs);
+    this.admission?.record(timestampMs, this.deliveryBytes);
     this.lastDelivery = { timestampMs, sample };
     return 'sent';
   }

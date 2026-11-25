@@ -38,6 +38,7 @@ export const PHASE2_BUFFER_MAX_AGE_MS = 3_000;
 export const PHASE2_BUFFER_MAX_FRAMES = 90;
 export const PHASE2_BUFFER_MAX_BYTES = 3_000_000;
 export const PHASE2_RETRIEVAL_WINDOW_MS = 5_000;
+export const PHASE2_REALTIME_MAX_BYTES = 1_000_000;
 export const PHASE2_RETRIEVAL_MAX_FRAMES = 6;
 export const PHASE2_RETRIEVAL_MAX_BYTES = 2_000_000;
 export const PHASE2_TOTAL_MAX_FRAMES = BENCHMARK_FRAME_LIMIT + PHASE2_RETRIEVAL_MAX_FRAMES;
@@ -141,6 +142,11 @@ function strategyPolicy(id: Phase2StrategyId) {
 function retrievalConfig(sessionId: string, oracle: boolean) {
   return {
     sessionId,
+    realtime: {
+      windowMs: PHASE2_RETRIEVAL_WINDOW_MS,
+      maxFrames: BENCHMARK_FRAME_LIMIT,
+      maxBytes: PHASE2_REALTIME_MAX_BYTES,
+    },
     retrieval: oracle
       ? { windowMs: PHASE2_RETRIEVAL_WINDOW_MS, maxFrames: 10_000, maxBytes: 100_000_000 }
       : {
@@ -173,14 +179,19 @@ export function runPhase2StrategyOnScene(
     maxBytes: PHASE2_BUFFER_MAX_BYTES,
   });
   const replayClock = { now: 0 };
-  const service = strategy === 'local-retrieval' || strategy === 'local-oracle-retrieval'
-    ? new ActiveRetrievalService(buffer, retrievalConfig(sessionId, strategyInfo.oracle), () => replayClock.now)
-    : null;
+  const service = new ActiveRetrievalService(
+    buffer,
+    retrievalConfig(sessionId, strategyInfo.oracle),
+    () => replayClock.now,
+  );
   const sampler = new Sampler<null, PixelSample>(
     createPolicy(strategyPolicy(strategy), BENCHMARK_DEFAULT_LOCAL),
     new BudgetController(BENCHMARK_BUDGET_WINDOW_MS, BENCHMARK_FRAME_LIMIT),
     BENCHMARK_TIMING,
     { accept: () => true },
+    undefined,
+    service.admission,
+    PHASE2_SAMPLE_BYTES,
   );
 
   const realtimeDeliveries: Delivery[] = [];
@@ -229,10 +240,9 @@ export function runPhase2StrategyOnScene(
     if (decision === 'sent') {
       realtimeDeliveries.push({ sequence: replayFrame.sequence, timestampMs: replayFrame.timestampMs });
       realtimeBytes += PHASE2_SAMPLE_BYTES;
-      service?.recordRealtimeSend(replayFrame.timestampMs, PHASE2_SAMPLE_BYTES);
     }
 
-    if (service && strategy === 'local-retrieval' && decision === 'budget'
+    if (strategy === 'local-retrieval' && decision === 'budget'
       && replayFrame.timestampMs - lastCueTimestampMs >= cueIntervalMs) {
       lastCueTimestampMs = replayFrame.timestampMs;
       const requestStarted = performance.now();
@@ -249,7 +259,7 @@ export function runPhase2StrategyOnScene(
       }
     }
 
-    if (service && strategyInfo.oracle) {
+    if (strategyInfo.oracle) {
       for (const query of oracleQueries) {
         if (query.done || replayFrame.timestampMs < query.atMs) continue;
         query.done = true;
@@ -274,7 +284,7 @@ export function runPhase2StrategyOnScene(
   const realtimeEvents: ResourceEvent[] = realtimeDeliveries.map((delivery) => ({ ...delivery, bytes: PHASE2_SAMPLE_BYTES }));
   const retrievalEvents: ResourceEvent[] = retrievalDeliveries.map((delivery) => ({ ...delivery, bytes: delivery.bytes }));
   const totalEvents = [...realtimeEvents, ...retrievalEvents];
-  const serviceStats = service?.stats();
+  const serviceStats = service.stats();
   const bufferStats = buffer.stats();
   const latency = retrievalLatencyStats(retrievalLatencies);
   const realtimeBudgetViolations = countBudgetViolations(
@@ -318,8 +328,8 @@ export function runPhase2StrategyOnScene(
     missedAfter: combinedEvaluation.missedEvents,
     realtimeFirstCaptureLatencyMs: realtimeEvaluation.meanFirstCaptureLatencyMs,
     postFirstCaptureLatencyMs: combinedEvaluation.meanFirstCaptureLatencyMs,
-    retrievalRequests: serviceStats?.requests ?? 0,
-    retrievalDenied: serviceStats?.budgetDenied ?? 0,
+    retrievalRequests: serviceStats.requests,
+    retrievalDenied: serviceStats.budgetDenied,
     retrievalLatencyMeanMs: latency.mean,
     retrievalLatencyP95Ms: latency.p95,
     peakCacheBytes,
@@ -337,10 +347,9 @@ export function runPhase2StrategyOnScene(
     missedAfterIds: combinedEvaluation.missedEventIds,
     inputDigest: inputDigest(scene),
     decisionDigest: decisionDigest(decisions, realtimeDeliveries, retrievalDeliveries),
-    retrievalLog: serviceStats?.log ?? [],
+    retrievalLog: serviceStats.log,
   };
-  service?.dispose();
-  if (!service) buffer.dispose();
+  service.dispose();
   return result;
 }
 

@@ -106,6 +106,31 @@ describe('stream sampler', () => {
     expect(accepted).toEqual([1, 3, 5]);
   });
 
+  it('applies shared admission before the sink without charging the sampler budget on denial', () => {
+    const accepted: number[] = [];
+    const admitted: Array<{ timestampMs: number; bytes: number }> = [];
+    const admission = {
+      canSend: (timestampMs: number) => timestampMs !== 250,
+      record: (timestampMs: number, bytes: number) => admitted.push({ timestampMs, bytes }),
+    };
+    const sampler = new Sampler(
+      new FixedSamplingPolicy(250),
+      new BudgetController(5_000, 2),
+      timing,
+      { accept: ({ sequence }) => { accepted.push(sequence); return true; } },
+      () => 0,
+      admission,
+      100,
+    );
+
+    expect(sampler.process(frame(0, 1), gray(0))).toBe('sent');
+    expect(sampler.process(frame(250, 2), gray(0))).toBe('budget');
+    expect(sampler.process(frame(500, 3), gray(0))).toBe('sent');
+    expect(accepted).toEqual([1, 3]);
+    expect(admitted).toEqual([{ timestampMs: 0, bytes: 100 }, { timestampMs: 500, bytes: 100 }]);
+    expect(sampler.snapshot().reasons.budget).toBe(1);
+  });
+
   it('retries an initially busy sink with the next frame', () => {
     const sink = { accept: ({ sequence }: StreamFrame<null>) => sequence > 1 };
     const sampler = new Sampler(new FixedSamplingPolicy(250), new BudgetController(5_000, 1), timing, sink);

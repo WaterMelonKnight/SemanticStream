@@ -1,7 +1,7 @@
 import type { PixelSample, SamplingContext, SamplingPolicy } from './sampling';
 import { AdaptiveSamplingPolicy } from './sampling';
 
-export type AdaptiveStrategy = 'global' | 'local' | 'hybrid';
+export type AdaptiveStrategy = 'global' | 'local' | 'hybrid' | 'task';
 
 export interface LocalChangeConfig {
   readonly sampleWidth: number;
@@ -156,15 +156,18 @@ export class AdaptiveStrategyPolicy implements SamplingPolicy<PixelSample> {
   private strategy: AdaptiveStrategy;
   private readonly globalPolicy: AdaptiveSamplingPolicy;
   private readonly localPolicy: LocalSamplingPolicy;
+  private readonly taskGate?: () => boolean;
 
   constructor(options: {
     readonly strategy: AdaptiveStrategy;
     readonly globalThreshold: number;
     readonly local: LocalChangeConfig;
+    readonly taskGate?: () => boolean;
   }) {
     this.strategy = options.strategy;
     this.globalPolicy = new AdaptiveSamplingPolicy(options.globalThreshold);
     this.localPolicy = new LocalSamplingPolicy(options.local);
+    this.taskGate = options.taskGate;
   }
 
   get activeStrategy(): AdaptiveStrategy {
@@ -195,6 +198,8 @@ export class AdaptiveStrategyPolicy implements SamplingPolicy<PixelSample> {
         return this.localPolicy.wantsFrame(context);
       case 'hybrid':
         return this.globalPolicy.wantsFrame(context) || this.localPolicy.wantsFrame(context);
+      case 'task':
+        return this.taskGate?.() ?? false;
     }
   }
 }

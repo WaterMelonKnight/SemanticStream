@@ -1,6 +1,7 @@
 import type { BufferedFrame, DataStatus, FrameLookupResult, PixelRegion, RegionImage, TimeRange } from './context-buffer';
 import { ContextBuffer } from './context-buffer';
-import { RollingResourceBudget } from './resource-budget';
+import { ResourceAdmissionController } from './resource-admission';
+import type { ResourceAdmissionSnapshot } from './resource-admission';
 import type { ResourceBudgetLimits } from './resource-budget';
 
 export type RetrievalMethod =
@@ -12,19 +13,7 @@ export type RetrievalMethod =
 
 export type RetrievalStatus = DataStatus | 'budget-denied';
 
-export interface ResourceSnapshot {
-  readonly usedFrames: number;
-  readonly usedBytes: number;
-  readonly maxFrames: number;
-  readonly maxBytes: number;
-  readonly windowMs: number;
-}
-
-export interface RetrievalBudgetSnapshot {
-  readonly retrieval: ResourceSnapshot;
-  readonly realtime: { readonly frames: number; readonly bytes: number };
-  readonly total: ResourceSnapshot;
-}
+export type RetrievalBudgetSnapshot = ResourceAdmissionSnapshot;
 
 export interface RetrievalResponseBase {
   readonly requestId: string;
@@ -93,6 +82,7 @@ export interface RetrievalStats {
 
 export interface ActiveRetrievalConfig {
   readonly sessionId: string;
+  readonly realtime: ResourceBudgetLimits;
   readonly retrieval: ResourceBudgetLimits;
   readonly total: ResourceBudgetLimits;
   readonly logCapacity?: number;
@@ -104,8 +94,7 @@ export interface ActiveRetrievalConfig {
  * this service owns request accounting and request-log retention.
  */
 export class ActiveRetrievalService {
-  private readonly retrievalBudget: RollingResourceBudget;
-  private readonly totalBudget: RollingResourceBudget;
+  readonly admission: ResourceAdmissionController;
   private readonly logCapacity: number;
   private readonly requests: RetrievalLogEntry[] = [];
   private requestCounter = 0;
@@ -130,8 +119,11 @@ export class ActiveRetrievalService {
     if (config.retrieval.windowMs !== config.total.windowMs) {
       throw new RangeError('Retrieval and total resource windows must match.');
     }
-    this.retrievalBudget = new RollingResourceBudget(config.retrieval);
-    this.totalBudget = new RollingResourceBudget(config.total);
+    this.admission = new ResourceAdmissionController({
+      realtime: config.realtime,
+      retrieval: config.retrieval,
+      total: config.total,
+    });
     this.logCapacity = config.logCapacity ?? 40;
     if (!Number.isSafeInteger(this.logCapacity) || this.logCapacity < 1) {
       throw new RangeError('Retrieval log capacity must be a positive integer.');
@@ -142,13 +134,17 @@ export class ActiveRetrievalService {
     return this.config.sessionId;
   }
 
+  setRealtimeFrameLimit(maxFrames: number): void {
+    this.admission.setRealtimeFrameLimit(maxFrames);
+  }
+
   setTotalFrameLimit(maxFrames: number): void {
-    this.totalBudget.setLimits({ ...this.config.total, maxFrames });
+    this.admission.setTotalFrameLimit(maxFrames);
   }
 
   /** Record a frame already delivered by the real-time sampler. */
   recordRealtimeSend(timestampMs: number, bytes: number): void {
-    this.totalBudget.record(timestampMs, 1, bytes);
+    this.admission.record(timestampMs, bytes);
   }
 
   getLatestFrame(sessionId: string): FrameRetrievalResponse {
@@ -284,8 +280,6 @@ export class ActiveRetrievalService {
   dispose(): void {
     this.buffer.dispose();
     this.requests.length = 0;
-    this.retrievalBudget.clear();
-    this.totalBudget.clear();
     this.disposed = true;
   }
 
@@ -396,39 +390,15 @@ export class ActiveRetrievalService {
   }
 
   private canRetrieve(frames: number, bytes: number): boolean {
-    const now = this.now();
-    return this.retrievalBudget.canSpend(now, frames, bytes) && this.totalBudget.canSpend(now, frames, bytes);
+    return this.admission.canRetrieve(this.now(), frames, bytes);
   }
 
   private spend(frames: number, bytes: number): void {
-    const now = this.now();
-    this.retrievalBudget.record(now, frames, bytes);
-    this.totalBudget.record(now, frames, bytes);
+    this.admission.recordRetrieval(this.now(), frames, bytes);
   }
 
   private budgetSnapshot(now: number): RetrievalBudgetSnapshot {
-    const retrieval = this.retrievalBudget.used(now);
-    const total = this.totalBudget.used(now);
-    return {
-      retrieval: {
-        usedFrames: retrieval.frames,
-        usedBytes: retrieval.bytes,
-        maxFrames: this.config.retrieval.maxFrames,
-        maxBytes: this.config.retrieval.maxBytes,
-        windowMs: this.config.retrieval.windowMs,
-      },
-      realtime: {
-        frames: Math.max(0, total.frames - retrieval.frames),
-        bytes: Math.max(0, total.bytes - retrieval.bytes),
-      },
-      total: {
-        usedFrames: total.frames,
-        usedBytes: total.bytes,
-        maxFrames: this.totalBudget.limits.maxFrames,
-        maxBytes: this.totalBudget.limits.maxBytes,
-        windowMs: this.totalBudget.limits.windowMs,
-      },
-    };
+    return this.admission.snapshot(now);
   }
 
   private record(response: RetrievalResponse, frameCount: number, bytes: number): void {

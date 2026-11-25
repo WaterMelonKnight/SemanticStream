@@ -111,6 +111,22 @@ describe('block-local change detector', () => {
     expect(policy.wantsFrame(input)).toBe(false);
   });
 
+  it('uses only the external task gate when the task strategy is selected', () => {
+    let allowed = false;
+    const policy = new AdaptiveStrategyPolicy({
+      strategy: 'task',
+      globalThreshold: 1.5,
+      local: config,
+      taskGate: () => allowed,
+    });
+    const baseline = sample();
+    const current = sample();
+    paint(current, 1, 1, 255);
+    expect(policy.wantsFrame(context(baseline, current))).toBe(false);
+    allowed = true;
+    expect(policy.wantsFrame(context(baseline, current))).toBe(true);
+  });
+
   it('applies block-size changes to the next local decision', () => {
     const baseline = sample();
     const current = sample();

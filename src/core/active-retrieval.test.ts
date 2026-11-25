@@ -26,6 +26,7 @@ function frame(sequence: number, timestampMs: number): BufferedFrameInput {
 function config(overrides: Partial<ActiveRetrievalConfig> = {}): ActiveRetrievalConfig {
   return {
     sessionId: 'session-a',
+    realtime: { windowMs: 5_000, maxFrames: 20, maxBytes: 1_000_000 },
     retrieval: { windowMs: 5_000, maxFrames: 2, maxBytes: 1_000 },
     total: { windowMs: 5_000, maxFrames: 3, maxBytes: 2_000 },
     ...overrides,
@@ -73,7 +74,7 @@ describe('active retrieval protocol', () => {
     const stats = service.stats();
     expect(stats.retrievedFrames).toBe(2);
     expect(stats.budget.retrieval.usedFrames).toBe(2);
-    expect(stats.budget.realtime).toEqual({ frames: 1, bytes: BYTES });
+    expect(stats.budget.realtime).toMatchObject({ usedFrames: 1, usedBytes: BYTES, maxFrames: 20 });
     expect(stats.budget.total.usedFrames).toBe(3);
     expect(stats.budgetDenied).toBe(1);
   });

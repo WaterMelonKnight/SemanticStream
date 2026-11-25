@@ -1,6 +1,6 @@
 # Architecture
 
-SemanticStream selects context from a live stream for an AI agent operating under limited bandwidth and compute. Phase 0 sampled a procedural visual stream and delivered selected frames to an in-browser mock agent. Phase 1A added a local video adapter that produces the same `StreamFrame<VisualFrame>` sequence. Phase 1B adds a deterministic, budget-aware event evaluation with global, local-block, and hybrid adaptive policies. Phase 2 adds a bounded history buffer and an active retrieval protocol with separate and combined resource budgets.
+SemanticStream selects context from a live stream for an AI agent operating under limited bandwidth and compute. Phase 0 sampled a procedural visual stream and delivered selected frames to an in-browser mock agent. Phase 1A added a local video adapter that produces the same `StreamFrame<VisualFrame>` sequence. Phase 1B adds a deterministic, budget-aware event evaluation with global, local-block, and hybrid adaptive policies. Phase 2 adds a bounded history buffer and an active retrieval protocol with separate and combined resource budgets. Phase 3A adds a typed task/decision boundary and a unified ex-ante admission gate shared by adaptive real-time sends and retrieval.
 
 ## Runtime path
 
@@ -25,6 +25,11 @@ flowchart LR
   AdaptiveSink --> Agent
   SourceCanvas --> Buffer[Bounded ContextBuffer]
   Buffer --> Retrieval[ActiveRetrievalService]
+  Retrieval --> Admission[ResourceAdmissionController]
+  Strategy --> Decision[DecisionState + DecisionProvider]
+  Decision --> Admission
+  Admission --> AdaptiveSink
+  Admission --> Retrieval
   Retrieval --> Agent
 ```
 
@@ -45,8 +50,13 @@ Only one source is active. The procedural source draws its deterministic scene i
 | `SamplingSession` | Owns both samplers, both mock sinks, the shared thumbnail reader, the adaptive strategy policy, the bounded decision timeline, and the rolling rate meters for one uninterrupted comparison session. |
 | `Benchmark replay` | A browser-independent Node/browser-neutral runner that feeds deterministic `ReplayFrame` samples into separately constructed samplers. Event labels are held outside the replay input. |
 | `ContextBuffer` | Session-scoped, bounded history of owned 96 × 54 RGBA copies. Enforces max age, max frames, and max bytes; supports latest, sequence, timestamp, range, and region lookups with explicit availability statuses. |
-| `ActiveRetrievalService` | Applies a retrieval budget and a combined real-time + retrieval budget, logs bounded request/response records, and returns typed results with session IDs, ranges, latency, and budget snapshots. |
-| `RollingResourceBudget` | Rolling frame/byte ledger used for retrieval-only and combined budgets. Recording a real-time send is explicit; retrieval cannot spend beyond either limit. |
+| `ActiveRetrievalService` | Applies a retrieval budget and a combined real-time + retrieval budget, logs bounded request/response records, and returns typed results with session IDs, ranges, latency, and budget snapshots. It exposes the shared `ResourceAdmissionController` for adaptive real-time sends. |
+| `RollingResourceBudget` | Rolling frame/byte ledger. Real-time, retrieval, and total ledgers are separate; the total is the sum of admitted real-time and retrieval work. |
+| `ResourceAdmissionController` | Single ex-ante check for adaptive real-time sends and retrieval. A request must fit its independent sub-budget and the combined total. It returns no data when denied; a denied request consumes nothing. |
+| `DecisionState` | Read-only task-aware view: task/category/priority, declared ROI, global/local/ROI change, repeated-change counters, remaining budgets, cache ranges, and bounded recent decisions. It contains no evaluator labels or future frames. |
+| `DecisionProvider` | Pluggable decision boundary returning a finite action and candidate scores. Metric provenance is explicit (`heuristic` or `model-probability`); the provider cannot mutate budgets, buffers, or sinks. |
+| `RuleBasedDecisionProvider` | The Phase 3A heuristic provider. It scores `SEND_FRAME`, `SEND_PREVIEW`, `DROP`, `WAIT`, `REQUEST_HISTORY`, `REQUEST_REGION`, and `ESCALATE`; scores are rule weights, not probabilities. |
+| `DecisionEngine` | Enforces a timeout, validates the action against the allowlist, and runs the deterministic fallback on timeout, error, or invalid output. |
 | `MetricsCollector` | Keeps cumulative counts, per-reason filtered counts, and mean processing latency in constant space for each strategy. |
 
 ## Online decisions and time
@@ -164,12 +174,15 @@ The UI offers ownership-safe retrieval by clicking a decision-timeline column, u
 
 Every response carries a request ID, session ID, method, status, requested time, measured latency, retained/captured ranges, and a budget snapshot. Frame and range responses include owned pixel copies; region responses include only the cropped pixels and source-frame metadata. Requests are recorded in a bounded log.
 
-The service owns two rolling budgets:
+The shared admission controller owns three rolling ledgers:
 
-- Retrieval: 6 frames and 2 MB per five seconds.
+- Real-time sub-budget: 20 frames / 1 MB per five seconds in the live app and replay.
+- Retrieval sub-budget: 6 frames and 2 MB per five seconds.
 - Combined real-time + retrieval: 26 frames and 4 MB per five seconds.
 
-The existing real-time sampler keeps its 20 frames / 5 s `BudgetController`. The app calls `recordRealtimeSend` for the selected agent's real-time deliveries. A retrieval is rejected with `budget-denied` if either the retrieval budget or the combined budget would be exceeded; a rejected request consumes no budget. The benchmark independently audits all three limits.
+The existing real-time sampler keeps its own 20 frames / 5 s `BudgetController`; the admission controller adds the shared total gate and real-time byte/sub-budget gate. The adaptive sampler is constructed with the admission object, so it checks admission **before** the sink accepts a frame and records only after acceptance. The fixed branch in the live page is a comparison baseline and does not consume the adaptive agent's budget. In the benchmark every strategy, including fixed, runs through its own admission controller.
+
+A retrieval is rejected with `budget-denied` if either the retrieval budget or the combined budget would be exceeded; a rejected request consumes no budget. A real-time candidate denied by admission returns the sampler's `budget` decision and does not charge the sampler's frame ledger. The ledger is charged exactly once. The benchmark independently audits all three limits.
 
 The live page uses this protocol for timeline retrieval and a 24 × 16 region crop. It does not claim that the mock agent is a model.
 
@@ -190,6 +203,29 @@ The benchmark measures real-time recall, post-retrieval recall, missed events be
 
 Events entirely inside a capture gap remain unobservable. The oracle cannot recover them either. Retrieval can only return a frame that was captured and is still retained.
 
+## Phase 3A decision boundary
+
+`src/decision/` is DOM-free and browser-neutral. `DecisionFeatureExtractor` derives global, local, and ROI change only from the current and previous accepted sample plus the user-declared ROI. `DecisionState` adds budgets from `ResourceAdmissionController`, cache ranges from `ContextBuffer`, and a bounded recent-decision list. It never receives event labels, evaluator regions, or future frames.
+
+The action space is finite: `SEND_FRAME`, `SEND_PREVIEW`, `DROP`, `WAIT`, `REQUEST_HISTORY`, `REQUEST_REGION`, `ESCALATE`. `DecisionEngine` enforces a timeout, validates the action, and uses a deterministic Rule-based fallback. A provider returns only an action proposal. The sampler, `ActiveRetrievalService`, and admission controller execute effects; the provider cannot change a budget or bypass admission.
+
+`RuleBasedDecisionProvider` prioritizes ROI change, suppresses repeated ROI/background change, reacts to low real-time budget or prior denial with history/region requests, and escalates high-priority constrained cases. Its `score` values are heuristic weights. The result carries `scoreKind: 'heuristic'`; it is never presented as a calibrated probability.
+
+The live page evaluates the same provider at a 100 ms interval. By default it is an advisory preview. Selecting the `Task-aware (live gate)` adaptive strategy makes the decision gate the adaptive sampler's next send; `DROP`/`WAIT` do not override the sampler's silence refresh. Retrieval actions are executed by the Phase 3A benchmark, not by the live preview. The benchmark runs the decision as a gate on a fresh `Sampler` and runs retrieval actions through the shared service, so the benchmark result is an execution result rather than a UI-only annotation. The task panel also shows remaining real-time/retrieval budget and the current declared ROI.
+
+### Task-aware benchmark
+
+The Phase 3A benchmark uses the original six evaluation scenes plus three deterministic task scenes (random ROI, repeated event, overlapping event). Task definitions and ROIs are authored per scene. Evaluator labels are used only after replay for overall and ROI recall. Every strategy gets the same total frames/bytes budget, cache bounds, sampler timing, and retrieval sub-budget.
+
+- A: fixed 4 fps through admission.
+- B: adaptive local through admission.
+- C: adaptive local + cue retrieval through admission.
+- D: adaptive local + task-aware Rule Decision; one decision per 100 ms, with `SEND_FRAME`/`SEND_PREVIEW` gating the sampler and retrieval actions executed through the service.
+
+D is not guaranteed to beat the baselines. It misses the capture-pause visible event in the current held-out run while C recovers it; the report includes the loss. Decision scores are heuristic, not calibrated probabilities. The shared sampler's silence refresh still applies, so a `DROP`/`WAIT` preview cannot suppress the system refresh.
+
+Artifacts: `benchmarks/results/phase3.json`, `.csv`, `.md`, and `public/benchmark/phase3.json`.
+
 ## Concurrency, ownership, and measurement
 
 Capture, thumbnail preparation, both decisions, and sink copies run synchronously on the browser main thread. There is no frame queue or catch-up work. A busy sink can decline a candidate via its return value. A slow synchronous sink delays the animation or video callback and can reduce the capture rate for both branches. Future asynchronous sinks will need explicit ownership transfer and a bounded overflow policy.
@@ -206,4 +242,6 @@ Low-area changes, brief text, and RGB changes attenuated by downsampling can fal
 
 Recall measures only whether a frame was delivered inside a defined visual event window. It does not measure whether a vision model or language model understood the event, and it does not measure task success. The synthetic fixtures are small, 96 × 54, and intentionally sparse. The event labels are evaluator-only; a real deployment would need an independent labeling and evaluation pipeline.
 
-Phase 2 does not implement a whole-video archive, GPU inference, model APIs, a backend, or a semantic understanding model. The buffer is a short-lived evidence cache, not a replacement for the source. The oracle result is not evidence of autonomous event discovery. Later work may add opt-in sources, asynchronous sinks, and broader resource policies.
+Phase 2 does not implement a whole-video archive, GPU inference, model APIs, a backend, or a semantic understanding model. The buffer is a short-lived evidence cache, not a replacement for the source. The oracle result is not evidence of autonomous event discovery.
+
+Phase 3A does not deploy a model, download weights, call a paid API, or run on a GPU. The live task decision is advisory by default and can gate sends when the task-aware strategy is selected; the benchmark is the full execution proof for sends and retrieval actions. Task ROI is a declared user input, not a label. The decision heuristic can lose to the baselines; the held-out report shows both wins and misses. The live page only gates sends when the task-aware strategy is selected; retrieval actions remain benchmark-only. Later work may add opt-in sources, asynchronous sinks, a real adapter, calibrated probabilities, and broader resource policies.
