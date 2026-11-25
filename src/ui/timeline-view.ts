@@ -53,3 +53,13 @@ export function drawDecisionTimeline(canvas: HTMLCanvasElement, entries: readonl
       + `Adaptive sent ${adaptiveSent} and fixed sent ${fixedSent} in this window.`,
   );
 }
+
+/** Maps a pointer position to the displayed timeline slot, if any. */
+export function timelineEntryIndexAt(canvas: HTMLCanvasElement, clientX: number): number | null {
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width <= 0) return null;
+  const x = ((clientX - rect.left) / rect.width) * WIDTH;
+  const slotWidth = (WIDTH - PADDING * 2) / TIMELINE_CAPACITY;
+  const index = Math.floor((x - PADDING) / slotWidth);
+  return index >= 0 && index < TIMELINE_CAPACITY ? index : null;
+}

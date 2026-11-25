@@ -14,3 +14,9 @@ export function formatClock(ms: number | null): string {
 export function formatRate(value: number): string {
   return Number.isFinite(value) ? value.toFixed(1) : '—';
 }
+
+export function formatBytes(bytes: number): string {
+  if (bytes < 1_000) return `${bytes} B`;
+  if (bytes < 1_000_000) return `${(bytes / 1_000).toFixed(1)} KB`;
+  return `${(bytes / 1_000_000).toFixed(2)} MB`;
+}

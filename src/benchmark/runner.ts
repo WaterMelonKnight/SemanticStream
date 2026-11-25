@@ -88,7 +88,7 @@ function toLocalConfig(config: LocalTuning): LocalChangeConfig {
   };
 }
 
-function createPolicy(strategy: BenchmarkStrategyId, local: LocalTuning): SamplingPolicy<PixelSample> {
+export function createPolicy(strategy: BenchmarkStrategyId, local: LocalTuning): SamplingPolicy<PixelSample> {
   const localConfig = toLocalConfig(local);
   switch (strategy) {
     case 'fixed':
