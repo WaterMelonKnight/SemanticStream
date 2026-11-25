@@ -1,3 +1,4 @@
+import { SAMPLE_HEIGHT, SAMPLE_WIDTH } from '../core/sample';
 import type { PixelSample } from '../core/sampling';
 
 export const WIDTH = 720;
@@ -16,8 +17,8 @@ export class ThumbnailReader {
 
   constructor() {
     const canvas = document.createElement('canvas');
-    canvas.width = 96;
-    canvas.height = 54;
+    canvas.width = SAMPLE_WIDTH;
+    canvas.height = SAMPLE_HEIGHT;
     this.context = context2d(canvas, { alpha: false, willReadFrequently: true });
   }
 

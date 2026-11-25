@@ -1,10 +1,13 @@
 import { BudgetController } from '../core/budget';
 import type { FrameDecision, MetricsSnapshot } from '../core/metrics';
 import { RollingRate } from '../core/rate';
-import { AdaptiveSamplingPolicy, FixedSamplingPolicy } from '../core/sampling';
+import { AdaptiveStrategyPolicy } from '../core/local-change';
+import type { AdaptiveStrategy } from '../core/local-change';
+import { FixedSamplingPolicy } from '../core/sampling';
 import type { PixelSample, SamplingPolicy } from '../core/sampling';
 import { Sampler } from '../core/sampler';
 import type { StreamFrame } from '../core/stream';
+import { SAMPLE_HEIGHT, SAMPLE_WIDTH } from '../core/sample';
 import { BoundedTimeline } from '../core/timeline';
 import { ThumbnailReader } from '../visual/canvas';
 import { MockAgent } from '../visual/mock-agent';
@@ -28,6 +31,10 @@ export interface TimelineEntry {
 export interface SessionSettings {
   readonly threshold: number;
   readonly budget: number;
+  readonly adaptiveStrategy: AdaptiveStrategy;
+  readonly localThreshold: number;
+  readonly blockWidth: number;
+  readonly blockHeight: number;
 }
 
 export interface SessionRates {
@@ -55,7 +62,7 @@ export class SamplingSession {
   private readonly adaptiveSendRate = new RollingRate(RATE_WINDOW_MS, 200);
   private readonly fixedSendRate = new RollingRate(RATE_WINDOW_MS, 200);
   private readonly agents: Record<SamplingMode, MockAgent>;
-  private readonly adaptivePolicy: AdaptiveSamplingPolicy;
+  private readonly adaptivePolicy: AdaptiveStrategyPolicy;
   private readonly adaptiveBudget: BudgetController;
   private readonly fixedBudget: BudgetController;
   private readonly samplers: Record<SamplingMode, Sampler<VisualFrame, PixelSample>>;
@@ -70,7 +77,18 @@ export class SamplingSession {
       adaptive: new MockAgent(adaptiveCanvas),
       fixed: new MockAgent(fixedCanvas),
     };
-    this.adaptivePolicy = new AdaptiveSamplingPolicy(settings.threshold);
+    this.adaptivePolicy = new AdaptiveStrategyPolicy({
+      strategy: settings.adaptiveStrategy,
+      globalThreshold: settings.threshold,
+      local: {
+        sampleWidth: SAMPLE_WIDTH,
+        sampleHeight: SAMPLE_HEIGHT,
+        blockWidth: settings.blockWidth,
+        blockHeight: settings.blockHeight,
+        threshold: settings.localThreshold,
+        minChangedBlocks: 1,
+      },
+    });
     this.adaptiveBudget = new BudgetController(BUDGET_WINDOW_MS, settings.budget);
     this.fixedBudget = new BudgetController(BUDGET_WINDOW_MS, settings.budget);
     const fixedPolicy: SamplingPolicy<PixelSample> = new FixedSamplingPolicy(250);
@@ -99,8 +117,24 @@ export class SamplingSession {
     return { adaptive, fixed };
   }
 
+  get adaptiveStrategy(): AdaptiveStrategy {
+    return this.adaptivePolicy.activeStrategy;
+  }
+
+  setAdaptiveStrategy(strategy: AdaptiveStrategy): void {
+    this.adaptivePolicy.setStrategy(strategy);
+  }
+
   setThreshold(threshold: number): void {
-    this.adaptivePolicy.setThreshold(threshold);
+    this.adaptivePolicy.setGlobalThreshold(threshold);
+  }
+
+  setLocalThreshold(threshold: number): void {
+    this.adaptivePolicy.setLocalThreshold(threshold);
+  }
+
+  setBlockSize(blockWidth: number, blockHeight: number): void {
+    this.adaptivePolicy.setBlockSize(blockWidth, blockHeight);
   }
 
   setBudget(frameLimit: number): void {
