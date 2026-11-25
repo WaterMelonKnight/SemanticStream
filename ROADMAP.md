@@ -57,9 +57,16 @@
 - Connect the Phase 3R sampling and retrieval pipeline to the independent Lab with a synthetic system monitor, procedural source, local files and an opt-in camera.
 - Replay identical simulated events under equivalent budgets. Publish per-event latencies, failures, stale suppression and usage accounting in [the Phase 4A report](benchmarks/results/phase4a-runtime.md).
 
-## Next · Real provider adapters
+## Phase 4A+1 · Streaming text gateway
 
-- Add a server-side DeepSeek streaming adapter with attempt-scoped partials, reliable cancellation/terminal handling and usage receipts. Keep credentials outside the static frontend.
-- Add opt-in image transfer to a vision-capable model using bounded snapshots and distinct upload and provider budgets. Evaluate visual semantics separately from frame selection.
+- Add opt-in DeepSeek and OpenAI-compatible SSE profiles behind a local Node gateway. Keep credentials and persistent cost admission server-side.
+- Bound multi-turn text context and measure gateway dispatch, first text, effective output, stop latency, terminal wait and token use. Report rejected and unanswered tasks in matched policy runs.
+- Validate the adapter without paid calls and provide explicit smoke commands for an operator-configured endpoint.
+- Quarantine attempts without reliable terminal evidence, preserve provisional costs and document operator reconciliation.
+
+## Next · Deployed validation and additional modalities
+
+- Validate the gateway against a real, explicitly authorized endpoint and evaluate a Workers relay with durable shared admission.
+- Add opt-in image transfer to a vision-capable model using bounded snapshots and separate upload and provider budgets. Evaluate visual semantics separately from frame selection.
 - Optionally add TTS behind the output coordinator with bounded, interruptible playback.
-- Defer heterogeneous pools, GPU execution, native bidirectional model transport, distributed state and training until a real single-endpoint lifecycle is verified.
+- Defer heterogeneous pools, GPU execution, native bidirectional model transport and training.

@@ -18,16 +18,16 @@ export class OutputCoordinator {
   partial(
     task: InferenceTask, chunk: PartialOutput, expectedIndex: number,
     active: boolean, session: number, interaction: number, nowMs: number,
-  ): boolean {
+  ): 'authorized' | 'stale' | 'invalid' | 'full' {
     const writer = this.writers.get(task.channel) ?? 0;
     if (!active || task.sessionVersion !== session || task.interactionVersion !== interaction
-      || nowMs >= task.deadlineMs || task.id < writer || chunk.index !== expectedIndex
-      || typeof chunk.text !== 'string' || chunk.text.length === 0) return false;
+      || nowMs >= task.deadlineMs || task.id < writer) return 'stale';
+    if (chunk.index !== expectedIndex || typeof chunk.text !== 'string' || chunk.text.length === 0) return 'invalid';
 
     const index = this.entries.findIndex(({ taskId }) => taskId === task.id);
     const previous = this.entries[index];
     const text = (previous?.text ?? '') + chunk.text.slice(0, MAX_OUTPUT_CHARS - (previous?.text.length ?? 0));
-    if (text === previous?.text) return false;
+    if (text === previous?.text) return 'full';
     const entry = Object.freeze({ taskId: task.id, channel: task.channel, text, state: 'streaming' } as const);
     if (task.id > writer) {
       this.change(writer, 'superseded');
@@ -41,12 +41,14 @@ export class OutputCoordinator {
         this.entries.splice(oldestHistorical, 1);
       }
     }
-    return true;
+    return 'authorized';
   }
 
-  finish(task: InferenceTask, success: boolean): void {
+  finish(task: InferenceTask, success: boolean): string | undefined {
     const entry = this.entries.find(({ taskId }) => taskId === task.id);
-    if (entry?.state === 'streaming') this.change(task.id, success ? 'completed' : 'stopped');
+    if (entry?.state !== 'streaming') return;
+    this.change(task.id, success ? 'completed' : 'stopped');
+    if (success) return entry.text;
   }
 
   retire(channel?: OutputChannel): void {

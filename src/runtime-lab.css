@@ -60,3 +60,8 @@ canvas { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; backgr
   .capture-grid, .details-grid { grid-template-columns: minmax(0, 1fr); }
   .masthead { font-size: .85rem; }
 }
+
+#gateway-controls { flex: 1 1 100%; }
+#gateway-controls input { display: block; margin-top: .3rem; width: min(100%, 24rem); }
+#provider-status { flex: 1 1 100%; margin-block: .1rem; color: var(--subtle); font-size: .85rem; }
+main { padding-bottom: 1rem; }

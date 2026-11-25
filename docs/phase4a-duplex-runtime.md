@@ -39,7 +39,10 @@ System monitor buttons change a synthetic service dashboard and inject known met
 
 There is no automatic recovery for permanently missing reliable terminal evidence, so an unresponsive upstream can exhaust the endpoint until the runtime is abandoned. The fixed priority order can starve low-priority work until its deadline. FIFO and SemanticStream use the same safe output arbitration. Provisional liabilities are retained for the lifetime of the runtime and are not reconciled by a later billing receipt in this phase. There is no native bidirectional transport, multi-model routing, distributed state, GPU inference, real model, billing, screen sharing or audio chain.
 
-## Next adapters
+## Subsequent adapters
+
+Phase 4A+1 implements the optional text gateway and its streaming profiles. See the [streaming provider implementation](real-streaming-provider.md) for the current contract and setup. The following items describe the original Phase 4A integration plan.
+
 
 1. Add a trusted DeepSeek gateway that holds credentials server-side. Implement `InferenceProvider.start` by mapping an attempt to one streamed request, numbering its text deltas and emitting a terminal callback only when the gateway has credible completion evidence. Map supported terminal usage fields to the token ledger and preserve provisional usage when absent. A disconnected client or aborted fetch alone cannot prove the upstream job ended.
 2. Set provider request limits and deadlines on that gateway before enabling concurrency. Encode the immutable snapshot for the endpoint's supported modalities. A text-only endpoint can receive text and known event metadata. To use pixels, add a vision-capable adapter and explicitly opt in to bounded image transfer and its byte/usage limits.
