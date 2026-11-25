@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="A local visual streaming demo that compares fixed and adaptive sampling on the same live feed." />
+    <meta name="description" content="A local visual streaming demo that compares fixed and adaptive sampling on the same live feed: procedural scene or a video you choose." />
     <meta name="theme-color" content="#10101a" />
     <link rel="icon" href="/favicon.png" type="image/png" />
     <title>SemanticStream — Visual stream demo</title>
@@ -20,25 +20,55 @@
     <main class="container">
       <div class="intro">
         <h1>Less data. <span>More understanding.</span></h1>
-        <p>Compare fixed and adaptive sampling on the same live visual stream.</p>
+        <p>Compare fixed and adaptive sampling on the same live visual stream. Use the built-in scene or choose a local video.</p>
       </div>
       <noscript>Enable JavaScript to run the visual stream.</noscript>
 
       <section class="stream" aria-labelledby="stream-title">
         <div class="section-heading">
           <h2 id="stream-title">Live stream</h2>
-          <button id="restart" class="restart" type="button"><span aria-hidden="true">↻</span> Restart demo</button>
+          <button id="restart" class="restart" type="button"><span aria-hidden="true">↻</span> <span id="restart-label">Restart demo</span></button>
         </div>
+
+        <section class="panel source-panel" aria-labelledby="source-title">
+          <div class="source-head">
+            <div class="source-copy">
+              <h2 id="source-title">Visual input</h2>
+              <p id="source-status" class="source-status" role="status" data-state="demo">Built-in procedural demo · processed locally</p>
+            </div>
+            <div class="source-actions">
+              <button id="choose-video" class="file-button" type="button">Choose local video</button>
+              <button id="use-demo" class="secondary-button" type="button" hidden>Built-in demo</button>
+            </div>
+          </div>
+          <p id="video-error" class="video-error" role="alert" hidden></p>
+          <div id="video-controls" class="video-controls" hidden>
+            <div class="video-buttons">
+              <button id="video-play" class="secondary-button" type="button" disabled>Play</button>
+              <button id="video-restart" class="secondary-button" type="button" disabled>Restart</button>
+              <span class="capture-badge">Capture <b id="video-capture">—</b></span>
+            </div>
+            <div class="video-scrub">
+              <input id="video-seek" type="range" min="0" max="0" step="0.01" value="0" aria-label="Video position" disabled />
+              <span id="video-time" class="video-time">— / —</span>
+            </div>
+          </div>
+          <p class="source-hint">MP4 and WebM support depends on this browser’s codecs. The file is read locally with an Object URL; no video or frame is uploaded.</p>
+          <video id="video-element" class="video-element" playsinline muted preload="auto" aria-hidden="true" tabindex="-1"></video>
+          <input id="video-file" class="visually-hidden" type="file" accept="video/mp4,video/webm,video/ogg,video/quicktime,video/*" tabindex="-1" />
+        </section>
+
         <div class="views">
           <article class="panel view">
             <header class="view-header">
               <h3><i class="view-dot" aria-hidden="true"></i>Original feed</h3>
               <span id="source-phase" class="phase">Waiting</span>
             </header>
-            <canvas id="source-canvas" width="720" height="405" role="img" aria-label="Original procedural visual feed"></canvas>
+            <canvas id="source-canvas" width="720" height="405" role="img" aria-label="Original visual feed from the procedural scene or the selected local video"></canvas>
             <footer class="view-footer">
               <span id="source-sequence">No frame yet</span>
-              <span id="source-time">—</span>
+              <span id="source-time" title="Source position: procedural scene time or video media time">—</span>
+              <span id="source-timestamp" title="Monotonic capture timestamp from performance.now()">—</span>
             </footer>
           </article>
           <article class="panel view agent-view">
@@ -85,35 +115,73 @@
 
         <section class="panel metrics" aria-labelledby="metrics-title">
           <h2 id="metrics-title">Live metrics</h2>
-          <p>Cumulative results for this session.</p>
-          <div class="metrics-table" role="region" aria-label="Sampling metrics table" tabindex="0">
-            <table>
+          <p>Cumulative results for this sampling session. Rates use a rolling two-second window.</p>
+          <div class="table-scroll" role="region" aria-label="Sampling metrics table" tabindex="0">
+            <table class="metrics-table">
               <thead>
                 <tr>
                   <th scope="col">Mode</th>
                   <th scope="col">Input</th>
                   <th scope="col">Sent</th>
-                  <th scope="col">Filtered</th>
-                  <th scope="col">Avg. latency</th>
+                  <th scope="col">Filtered / avg</th>
                 </tr>
               </thead>
               <tbody>
                 <tr id="metrics-adaptive" data-active="true">
                   <th scope="row">Adaptive</th>
-                  <td id="adaptive-inputs">0</td><td id="adaptive-sent">0</td>
-                  <td id="adaptive-filtered">—</td><td id="adaptive-latency">—</td>
+                  <td><span id="adaptive-inputs">0</span><small id="adaptive-input-rate" class="rate">—</small></td>
+                  <td><span id="adaptive-sent">0</span><small id="adaptive-sent-rate" class="rate">—</small></td>
+                  <td><span id="adaptive-filtered">—</span><small id="adaptive-latency" class="rate">—</small></td>
                 </tr>
                 <tr id="metrics-fixed" data-active="false">
                   <th scope="row">Fixed</th>
-                  <td id="fixed-inputs">0</td><td id="fixed-sent">0</td>
-                  <td id="fixed-filtered">—</td><td id="fixed-latency">—</td>
+                  <td><span id="fixed-inputs">0</span><small id="fixed-input-rate" class="rate">—</small></td>
+                  <td><span id="fixed-sent">0</span><small id="fixed-sent-rate" class="rate">—</small></td>
+                  <td><span id="fixed-filtered">—</span><small id="fixed-latency" class="rate">—</small></td>
                 </tr>
               </tbody>
             </table>
           </div>
-          <p class="metric-note">Latency includes thumbnail preparation, sampling, and any agent copy. Brief visual events can be missed.</p>
+          <p id="sent-delta" class="metric-note">Waiting for input frames.</p>
+          <div class="reason-list" role="list" aria-label="Filtered frame reasons">
+            <div class="reason-row" role="listitem">
+              <span class="reason-mode">Adaptive</span>
+              <span>Policy <b id="adaptive-policy">0</b></span>
+              <span>Interval <b id="adaptive-interval">0</b></span>
+              <span>Budget <b id="adaptive-budget">0</b></span>
+              <span>Busy <b id="adaptive-backpressure">0</b></span>
+            </div>
+            <div class="reason-row" role="listitem">
+              <span class="reason-mode">Fixed</span>
+              <span>Policy <b id="fixed-policy">0</b></span>
+              <span>Interval <b id="fixed-interval">0</b></span>
+              <span>Budget <b id="fixed-budget">0</b></span>
+              <span>Busy <b id="fixed-backpressure">0</b></span>
+            </div>
+          </div>
+          <p class="metric-note">Busy means the mock sink declined a frame. Latency includes thumbnail preparation, sampling, and any agent copy. Brief visual events can be missed.</p>
         </section>
       </div>
+
+      <section class="panel timeline-panel" aria-labelledby="timeline-title">
+        <div class="timeline-heading">
+          <div>
+            <h2 id="timeline-title">Frame decision timeline</h2>
+            <p>Top lane: adaptive. Bottom lane: fixed. Each column is one shared input frame.</p>
+          </div>
+          <span id="timeline-count" class="timeline-count">0 / 150 latest input frames kept</span>
+        </div>
+        <div class="timeline-canvas-wrap">
+          <canvas id="timeline-canvas" width="1200" height="180" role="img" aria-label="Bounded decision timeline for adaptive and fixed sampling"></canvas>
+        </div>
+        <ul class="timeline-legend" aria-label="Timeline colors">
+          <li><i class="swatch" data-decision="sent" aria-hidden="true"></i>Sent</li>
+          <li><i class="swatch" data-decision="policy" aria-hidden="true"></i>Policy</li>
+          <li><i class="swatch" data-decision="interval" aria-hidden="true"></i>Interval</li>
+          <li><i class="swatch" data-decision="budget" aria-hidden="true"></i>Budget</li>
+          <li><i class="swatch" data-decision="backpressure" aria-hidden="true"></i>Busy</li>
+        </ul>
+      </section>
     </main>
   </body>
 </html>

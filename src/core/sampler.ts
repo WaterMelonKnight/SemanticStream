@@ -1,6 +1,6 @@
 import type { BudgetController } from './budget';
 import { MetricsCollector } from './metrics';
-import type { MetricsSnapshot } from './metrics';
+import type { FrameDecision, MetricsSnapshot } from './metrics';
 import type { SamplingContext, SamplingPolicy } from './sampling';
 import type { ContextSink, StreamFrame } from './stream';
 
@@ -9,7 +9,7 @@ export interface DeliveryTiming {
   readonly maximumSilenceMs: number;
 }
 
-export type FrameDecision = 'policy' | 'interval' | 'budget' | 'backpressure' | 'sent';
+export type { FrameDecision } from './metrics';
 
 export class Sampler<T, Sample> {
   private readonly metrics = new MetricsCollector();
@@ -41,7 +41,7 @@ export class Sampler<T, Sample> {
     this.previousTimestampMs = timestampMs;
 
     const decision = this.deliver(frame, sample, this.firstTimestampMs);
-    this.metrics.record(decision === 'sent', preparationMs + (this.now() - startedAt));
+    this.metrics.record(decision, preparationMs + (this.now() - startedAt));
     return decision;
   }
 

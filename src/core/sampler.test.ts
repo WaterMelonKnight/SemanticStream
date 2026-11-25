@@ -123,10 +123,22 @@ describe('stream sampler', () => {
       acceptingSink,
       () => { clock += 2; return clock; },
     );
-    expect(sampler.snapshot()).toEqual({ inputs: 0, sent: 0, filteredPercent: 0, meanProcessingMs: 0 });
+    expect(sampler.snapshot()).toEqual({
+      inputs: 0,
+      sent: 0,
+      filteredPercent: 0,
+      meanProcessingMs: 0,
+      reasons: { policy: 0, interval: 0, budget: 0, backpressure: 0 },
+    });
     sampler.process(frame(0), gray(0), 0.5);
     sampler.process(frame(100), gray(0), 1.5);
-    expect(sampler.snapshot()).toEqual({ inputs: 2, sent: 1, filteredPercent: 50, meanProcessingMs: 3 });
+    expect(sampler.snapshot()).toEqual({
+      inputs: 2,
+      sent: 1,
+      filteredPercent: 50,
+      meanProcessingMs: 3,
+      reasons: { policy: 1, interval: 0, budget: 0, backpressure: 0 },
+    });
   });
 
   it('rejects backwards and nonfinite frame timestamps without counting them', () => {
@@ -136,6 +148,29 @@ describe('stream sampler', () => {
     expect(() => sampler.process(frame(NaN), gray(0))).toThrow(RangeError);
     expect(sampler.snapshot().inputs).toBe(1);
     expect(sampler.process(frame(350), gray(0))).toBe('sent');
+  });
+
+  it('keeps independent budgets and acceptance state for the same input sequence', () => {
+    const fixedBudget = new BudgetController(5_000, 2);
+    const adaptiveBudget = new BudgetController(5_000, 20);
+    const fixed = new Sampler(new FixedSamplingPolicy(250), fixedBudget, timing, acceptingSink);
+    const adaptive = new Sampler(new AdaptiveSamplingPolicy(1.5), adaptiveBudget, timing, acceptingSink);
+    for (let sequence = 1; sequence <= 80; sequence += 1) {
+      const input = frame((sequence - 1) * 50, sequence);
+      const pixels = gray(sequence < 41 ? 0 : 255);
+      fixed.process(input, pixels);
+      adaptive.process(input, pixels);
+    }
+
+    expect(fixed.snapshot().inputs).toBe(80);
+    expect(adaptive.snapshot().inputs).toBe(80);
+    expect(fixed.snapshot().sent).toBe(2);
+    expect(fixed.snapshot().reasons.budget).toBeGreaterThan(0);
+    expect(adaptive.snapshot().sent).toBeGreaterThan(2);
+
+    fixedBudget.setLimit(20);
+    expect(fixed.snapshot().sent).toBe(2);
+    expect(adaptive.snapshot().sent).toBeGreaterThan(2);
   });
 
   it('allows a fair online comparison on the same sequence and rolling cap', () => {
