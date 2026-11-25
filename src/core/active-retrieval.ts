@@ -168,7 +168,7 @@ export class ActiveRetrievalService {
     endMs: number,
     options: { readonly maxFrames?: number } = {},
   ): RangeRetrievalResponse {
-    const startedAt = this.now();
+    const startedAt = this.requestStart();
     const requestId = this.nextRequestId();
     const failureBase = () => this.responseBase(requestId, sessionId, 'getFramesBetween', startedAt);
     if (this.disposed) return this.rangeFailure(failureBase(), startMs, endMs, 'disposed', 'The retrieval service is disposed.');
@@ -217,7 +217,7 @@ export class ActiveRetrievalService {
     locator: { readonly sequence: number } | { readonly timestampMs: number; readonly toleranceMs?: number },
     region: PixelRegion,
   ): RegionRetrievalResponse {
-    const startedAt = this.now();
+    const startedAt = this.requestStart();
     const requestId = this.nextRequestId();
     const failureBase = () => this.responseBase(requestId, sessionId, 'getRegion', startedAt);
     if (this.disposed) {
@@ -289,7 +289,7 @@ export class ActiveRetrievalService {
     sessionId: string,
     lookup: () => FrameLookupResult,
   ): FrameRetrievalResponse {
-    const startedAt = this.now();
+    const startedAt = this.requestStart();
     const requestId = this.nextRequestId();
     const failureBase = () => this.responseBase(requestId, sessionId, method, startedAt);
     if (this.disposed) return this.frameFailure(failureBase(), 'disposed', 'The retrieval service is disposed.');
@@ -322,6 +322,12 @@ export class ActiveRetrievalService {
     return response;
   }
 
+  private requestStart(): number {
+    const startedAt = this.now();
+    if (!Number.isFinite(startedAt)) throw new RangeError('Retrieval request time must be finite.');
+    return startedAt;
+  }
+
   private responseBase(
     requestId: string,
     sessionId: string,
@@ -329,6 +335,9 @@ export class ActiveRetrievalService {
     startedAt: number,
   ): RetrievalResponseBase {
     const completedAtMs = this.now();
+    if (!Number.isFinite(completedAtMs) || completedAtMs < startedAt) {
+      throw new RangeError('Retrieval completion time must be finite and at or after request start.');
+    }
     const bufferStats = sessionId === this.sessionId ? this.buffer.stats() : null;
     return {
       requestId,

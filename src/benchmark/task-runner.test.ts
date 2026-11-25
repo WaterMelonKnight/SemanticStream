@@ -35,3 +35,13 @@ describe('task-aware replay', () => {
     }
   });
 });
+
+it('keeps replay decisions and timings deterministic when evaluator labels change', async () => {
+  const scene = getTaskScenes()[0];
+  const first = await runTaskAwareScene(scene);
+  expect(await runTaskAwareScene(scene)).toEqual(first);
+  const unlabelled = await runTaskAwareScene({ ...scene, events: [] });
+  expect(unlabelled.decisionDigest).toBe(first.decisionDigest);
+  expect(unlabelled.actions).toEqual(first.actions);
+  expect(unlabelled.totalSent).toBe(first.totalSent);
+});

@@ -212,9 +212,8 @@ export function runPhase2StrategyOnScene(
     if (strategy === 'local-retrieval' && decision === 'budget'
       && replayFrame.timestampMs - lastCueTimestampMs >= cueIntervalMs) {
       lastCueTimestampMs = replayFrame.timestampMs;
-      const requestStarted = performance.now();
       const response = service.getLatestFrame(sessionId);
-      retrievalLatencies.push(performance.now() - requestStarted);
+      retrievalLatencies.push(response.latencyMs);
       if (response.status === 'available' && response.frame && response.deliveredAtMs !== null) {
         retrievalDeliveries.push({
           sequence: response.frame.sequence,
@@ -230,9 +229,8 @@ export function runPhase2StrategyOnScene(
       for (const query of oracleQueries) {
         if (query.done || replayFrame.timestampMs < query.atMs) continue;
         query.done = true;
-        const requestStarted = performance.now();
         const response = service.getFrameAtTimestamp(sessionId, query.atMs, 100);
-        retrievalLatencies.push(performance.now() - requestStarted);
+        retrievalLatencies.push(response.latencyMs);
         if (response.status === 'available' && response.frame && response.deliveredAtMs !== null) {
           retrievalDeliveries.push({
             sequence: response.frame.sequence,
@@ -481,7 +479,7 @@ export function runPhase2Benchmark(): Phase2Report {
       'Retrieval requests are charged to a separate retrieval budget and to a combined real-time + retrieval budget. The buffer is bounded by age, bytes, and frames.',
       'Events with no captured input frame cannot be recovered from the buffer. Retrieval can only return frames that were actually stored and are still retained.',
       'Evidence coverage uses capture inside the labeled window. Deadline coverage requires delivery before the window closes. Budget auditing uses delivery time.',
-      'Retrieval latency is measured wall-clock time and varies between runs; sampling decisions and replay inputs are deterministic.',
+      'Request and delivery timing uses the deterministic replay clock. Synchronous retrieval has zero simulated service time.',
     ],
   };
 }

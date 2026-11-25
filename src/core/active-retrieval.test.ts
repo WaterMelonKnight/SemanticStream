@@ -151,3 +151,12 @@ it('settles a historical delivery at completion and returns its committed usage'
   expect(service.admission.snapshot(10_000).total.usedFrames).toBe(1);
   expect(service.admission.snapshot(10_001).total.usedFrames).toBe(0);
 });
+
+it('spends nothing when the retrieval clock moves backwards before completion', () => {
+  const buffer = new ContextBuffer({ sessionId: 'session-a', maxAgeMs: 10_000, maxBytes: 10_000, maxFrames: 3 });
+  buffer.offer(frame(1, 0));
+  const times = [100, 99];
+  const service = new ActiveRetrievalService(buffer, config(), () => times.shift()!);
+  expect(() => service.getLatestFrame('session-a')).toThrow(RangeError);
+  expect(service.admission.snapshot(100).total).toMatchObject({ usedFrames: 0, reservedFrames: 0 });
+});

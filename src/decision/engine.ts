@@ -196,7 +196,7 @@ export class DecisionScheduler {
   }
 
   invalidateContext(): void {
-    this.clear();
+    this.clear(false);
     this.contextVersion += 1;
   }
 
@@ -213,7 +213,7 @@ export class DecisionScheduler {
 
   applicable(atMs: number): ScheduledDecision | null {
     const result = this.lastResult;
-    return result && atMs >= result.observedAtMs
+    return result && atMs >= result.completedAtMs && atMs >= result.observedAtMs
       && atMs - result.observedAtMs <= this.maxObservationAgeMs ? result : null;
   }
 
@@ -255,9 +255,9 @@ export class DecisionScheduler {
     }
   }
 
-  private clear(): void {
+  private clear(resetCadence = true): void {
     this.lastResult = null;
-    this.lastStartedAt = -Infinity;
+    if (resetCadence) this.lastStartedAt = -Infinity;
     const pending = this.pending;
     this.pending = null;
     pending?.abort();

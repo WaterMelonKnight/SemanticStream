@@ -7,6 +7,7 @@ import type { StreamFrame } from '../core/stream';
 import { proposesRealtimeDelivery } from '../decision/actions';
 import { aggregateEvidenceTiming, countResourceViolations, evaluateEvidence } from './evidence';
 import type { EvidenceDelivery } from './evidence';
+import { decisionBudget, decisionCache } from '../decision/snapshot';
 import { DecisionEngine } from '../decision/engine';
 import { DecisionFeatureExtractor } from '../decision/features';
 import { RuleBasedDecisionProvider } from '../decision/rule-provider';
@@ -31,7 +32,7 @@ import {
 } from './retrieval-runner';
 import { getTaskScenes, getTaskForScene } from './task-fixtures';
 import type { TaskAggregate, TaskConfig, TaskReport, TaskSceneResult, TaskSceneSummary, TaskSuiteResult } from './task-types';
-import { emptyActionCounts, taskConfigFor, taskResultFromPhase2 } from './task-types';
+import { emptyActionCounts, PHASE3_SCHEMA_VERSION, taskConfigFor, taskResultFromPhase2 } from './task-types';
 import { getScenes } from './fixtures';
 import type { BenchmarkScene } from './types';
 
@@ -73,32 +74,6 @@ function percentile(values: readonly number[], fraction: number): number {
 
 function taskConfig(task: TaskDefinition): TaskConfig {
   return taskConfigFor(task);
-}
-
-function budgetState(service: ActiveRetrievalService, timestampMs: number): DecisionState['budget'] {
-  const snapshot = service.admission.snapshot(timestampMs);
-  return {
-    realtimeRemainingFrames: Math.max(0, snapshot.realtime.maxFrames - snapshot.realtime.usedFrames),
-    realtimeRemainingBytes: Math.max(0, snapshot.realtime.maxBytes - snapshot.realtime.usedBytes),
-    retrievalRemainingFrames: Math.max(0, snapshot.retrieval.maxFrames - snapshot.retrieval.usedFrames),
-    retrievalRemainingBytes: Math.max(0, snapshot.retrieval.maxBytes - snapshot.retrieval.usedBytes),
-    totalRemainingFrames: Math.max(0, snapshot.total.maxFrames - snapshot.total.usedFrames),
-    totalRemainingBytes: Math.max(0, snapshot.total.maxBytes - snapshot.total.usedBytes),
-  };
-}
-
-function cacheState(buffer: ContextBuffer): DecisionState['cache'] {
-  const stats = buffer.stats();
-  return {
-    availableRange: stats.oldestTimestampMs === null
-      ? null
-      : { startMs: stats.oldestTimestampMs, endMs: stats.latestTimestampMs ?? stats.oldestTimestampMs },
-    capturedRange: stats.firstCapturedTimestampMs === null
-      ? null
-      : { startMs: stats.firstCapturedTimestampMs, endMs: stats.lastCapturedTimestampMs ?? stats.firstCapturedTimestampMs },
-    frameCount: stats.frameCount,
-    byteCount: stats.byteCount,
-  };
 }
 
 export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskSceneResult> {
@@ -206,12 +181,11 @@ export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskScen
           budgetDeniedCount,
           recentDecisions: [...recentDecisions],
         },
-        budget: budgetState(service, replayFrame.timestampMs),
-        cache: cacheState(buffer),
+        budget: decisionBudget(service.admission.snapshot(replayClock.now)),
+        cache: decisionCache(buffer.stats()),
       };
-      const startedAt = performance.now();
       const decision = await engine.decide(state);
-      decisionLatencies.push(performance.now() - startedAt);
+      decisionLatencies.push(decision.latencyMs);
       decisionRequests += 1;
       if (decision.degraded) decisionFallbacks += 1;
       actions[decision.action] += 1;
@@ -221,10 +195,9 @@ export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskScen
       gate.allow = proposesRealtimeDelivery(decision.action);
 
       if (decision.action === 'REQUEST_HISTORY') {
-        const requestStarted = performance.now();
         const target = Math.max(0, replayFrame.timestampMs - 250);
         const response = service.getFrameAtTimestamp(sessionId, target, 150);
-        retrievalLatencies.push(performance.now() - requestStarted);
+        retrievalLatencies.push(response.latencyMs);
         if (response.status === 'available' && response.frame && response.deliveredAtMs !== null) {
           retrievalDeliveries.push({
             sequence: response.frame.sequence,
@@ -235,9 +208,8 @@ export async function runTaskAwareScene(scene: BenchmarkScene): Promise<TaskScen
           retrievalBytes += response.bytes;
         }
       } else if (decision.action === 'REQUEST_REGION') {
-        const requestStarted = performance.now();
         const response = service.getRegion(sessionId, { timestampMs: replayFrame.timestampMs }, task.roi ?? FULL_FRAME);
-        retrievalLatencies.push(performance.now() - requestStarted);
+        retrievalLatencies.push(response.latencyMs);
         if (response.status === 'available' && response.sourceFrame && response.deliveredAtMs !== null) {
           retrievalDeliveries.push({
             sequence: response.sourceFrame.sequence,
@@ -423,7 +395,7 @@ export async function runTaskBenchmark(): Promise<TaskReport> {
     aggregates: TASK_STRATEGIES.map((strategy) => aggregateTaskResults(results, strategy.id)),
   };
   return {
-    schemaVersion: 4,
+    schemaVersion: PHASE3_SCHEMA_VERSION,
     phase: '3A-corrected',
     configuration: {
       sampleWidth: SAMPLE_WIDTH,

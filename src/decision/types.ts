@@ -81,6 +81,7 @@ export interface DecisionRecentState {
 
 export interface DecisionState {
   readonly sessionId: string;
+  /** Monotonic runtime time when the observation snapshot was assembled. */
   readonly timestampMs: number;
   readonly task: TaskDefinition;
   readonly change: DecisionChangeState;
