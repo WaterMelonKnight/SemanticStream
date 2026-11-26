@@ -258,3 +258,11 @@ The `ObjectDetectorProvider` boundary in `src/perception/provider.ts` exposes `l
 - The live comparison runs 8 s fixed + 8 s adaptive and reports load time, model bytes, P50/P95 inference, batches, effective FPS, queue/stale drops, long tasks, and elapsed time. It does not report accuracy because no labeled dataset exists.
 
 The self-hosted Wasm assets are copied from `node_modules` by `scripts/prepare-mediapipe-wasm.mjs` on `predev`/`prebuild`; the model is downloaded only after user opt-in. Runtime/model versions, sizes, license status, CSP and deployment limits are in [visual-perception-licenses.md](docs/visual-perception-licenses.md). Architecture, lifecycle and future tracking/state-index design are in [visual-perception.md](docs/visual-perception.md). Observed single-run numbers and real-device gaps are in [visual-perception-results.md](docs/visual-perception-results.md).
+
+## Phase 4A+1 · Streaming text integration
+
+The browser still owns admission policy, snapshots and output arbitration. The opt-in Node gateway owns provider credentials, authenticated request admission, persistent endpoint holds and cumulative cost exposure. It translates vendor SSE into a small request-scoped streaming protocol. The gateway quarantines capacity when upstream closure is ambiguous and preserves unknown usage in its ledger. User text can carry a bounded history of completed visible turns. Pixel evidence stays local.
+
+The gateway's static allowlist explicitly serves `perception.html` and only the MediaPipe module Wasm files, with `application/wasm` MIME. `index.html`/`runtime.html` keep the original CSP; `perception.html` alone adds `wasm-unsafe-eval`, `worker-src`, and `connect-src` for the pinned Google Storage model. No model weights or arbitrary static paths are served. The text gateway and perception detector are independent. The default gateway mode is the scripted/mock provider; a real paid call requires explicit operator configuration and smoke invocation.
+
+[Provider contract, recovery and deployment assessment](docs/real-streaming-provider.md)

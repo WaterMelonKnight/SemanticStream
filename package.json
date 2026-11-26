@@ -17,6 +17,10 @@
     "benchmark:phase2": "tsx src/benchmark/retrieval-cli.ts",
     "benchmark:phase3": "tsx src/benchmark/task-cli.ts",
     "benchmark:runtime": "tsx src/benchmark/runtime-cli.ts",
+    "gateway": "tsx src/gateway/main.ts",
+    "gateway:smoke": "tsx src/gateway/smoke.ts",
+    "gateway:reconcile": "tsx src/gateway/reconcile.ts",
+    "gateway:fixture": "tsx src/gateway/local-evaluation.ts",
     "predev": "node scripts/prepare-mediapipe-wasm.mjs",
     "prebuild": "node scripts/prepare-mediapipe-wasm.mjs"
   },

@@ -68,10 +68,16 @@
 - Benchmark fixed vs adaptive scheduling for load time, model bytes, P50/P95 inference, batches, effective FPS, drops, and page long tasks; do not report accuracy without labels.
 - Record runtime/model licenses, versions, sizes, deployment limits, and the YOLOX-Nano + ONNX Runtime Web feasibility.
 
-## Next · Real provider adapters
+## Phase 4A+1 · Streaming text gateway
 
+- Add opt-in DeepSeek and OpenAI-compatible SSE profiles behind a local Node gateway. Keep credentials and persistent cost admission server-side.
+- Bound multi-turn text context and measure gateway dispatch, first text, effective output, stop latency, terminal wait and token use. Report rejected and unanswered tasks in matched policy runs.
+- Validate the adapter without paid calls and provide explicit smoke commands for an operator-configured endpoint.
+- Quarantine attempts without reliable terminal evidence, preserve provisional costs and document operator reconciliation.
 
-- Add a server-side DeepSeek streaming adapter with attempt-scoped partials, reliable cancellation/terminal handling and usage receipts. Keep credentials outside the static frontend.
-- Add opt-in image transfer to a vision-capable model using bounded snapshots and distinct upload and provider budgets. Evaluate visual semantics separately from frame selection.
+## Next · Deployed validation and additional modalities
+
+- Validate the gateway against a real, explicitly authorized endpoint and evaluate a Workers relay with durable shared admission.
+- Add opt-in image transfer to a vision-capable model using bounded snapshots and separate upload and provider budgets. Evaluate visual semantics separately from frame selection.
 - Optionally add TTS behind the output coordinator with bounded, interruptible playback.
-- Defer heterogeneous pools, GPU execution, native bidirectional model transport, distributed state and training until a real single-endpoint lifecycle is verified.
+- Defer heterogeneous pools, GPU execution, native bidirectional model transport and training.

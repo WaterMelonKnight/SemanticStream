@@ -34,9 +34,24 @@ export interface Evidence {
   readonly data: string;
 }
 
+export interface ChatMessage {
+  readonly role: 'user' | 'assistant';
+  readonly content: string;
+}
+
+export interface TokenUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+}
+
+export function validTokenCount(count: unknown): count is number {
+  return typeof count === 'number' && Number.isSafeInteger(count) && count >= 0 && count <= 1_000_000_000;
+}
+
 export interface ContextSnapshot {
   readonly version: number;
   readonly evidence: readonly Evidence[];
+  readonly messages: readonly ChatMessage[];
   readonly encodedBytes: number;
 }
 
@@ -49,9 +64,10 @@ export interface InferenceRequest {
   readonly supersede?: boolean;
   /** An earlier queued or running task in the same interaction must succeed first. */
   readonly dependsOn?: number;
+  readonly textContext?: string;
 }
 
-export interface InferenceTask extends Readonly<Omit<InferenceRequest, 'ttlMs' | 'supersede'>> {
+export interface InferenceTask extends Readonly<Omit<InferenceRequest, 'ttlMs' | 'supersede' | 'textContext'>> {
   readonly id: number;
   readonly sessionVersion: number;
   readonly interactionVersion: number;
@@ -60,16 +76,22 @@ export interface InferenceTask extends Readonly<Omit<InferenceRequest, 'ttlMs' |
   readonly context: ContextSnapshot;
   readonly deadlineMs: number;
   readonly tokenLimit: number;
+  readonly tokenReservation: number;
 }
 
 export interface PartialOutput {
   readonly index: number;
   readonly text: string;
+  readonly upstreamFirstTextMs?: number;
+  readonly providerRequestId?: string;
 }
 
 export interface ProviderTerminal {
   readonly status: 'completed' | 'failed' | 'cancelled';
   readonly tokens: number | null;
+  readonly usage?: TokenUsage;
+  readonly providerRequestId?: string;
+  readonly upstreamElapsedMs?: number;
   readonly reason?: string;
 }
 
@@ -82,5 +104,9 @@ export interface InferenceProvider {
   start(task: InferenceTask, signal: AbortSignal, callbacks: {
     partial(chunk: PartialOutput): void;
     terminal(receipt: ProviderTerminal): void;
+    requested?(requestId: string): void;
+    dispatched?(requestId: string): void;
+    /** The transport ended without proof of upstream termination. */
+    unconfirmed?(reason: string): void;
   }): void;
 }

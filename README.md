@@ -4,7 +4,7 @@
 
 SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 added a bounded history buffer and active retrieval. Phase 3A adds a task-aware, pluggable decision boundary. Phase 3R hardens session lifetimes, resource admission and replay while keeping the browser demo local. Phase 4P.1 adds an opt-in lightweight visual-perception experiment. See the [Phase 3R audit](docs/architecture-audit-phase3r.md) and [runtime architecture](docs/runtime-architecture-v2.md).
 
-Everything runs locally in the browser or in Node.js. The selected video is read through a local Object URL and drawn to Canvas; no video or frame is uploaded. The project requires no GPU, backend, database, model API, or paid service.
+The static demo runs locally in the browser and the benchmarks run in Node.js. Selected videos are read through local Object URLs. Phase 4A+1 adds an opt-in, text-only streaming gateway. Media stays local in both modes.
 
 ## Run locally
 
@@ -33,7 +33,12 @@ Choose **Serial FIFO**, **Concurrent FIFO**, or **SemanticStream** with one or t
 
 Run `npm run benchmark:runtime` for the deterministic Node.js experiment. It exercises priority, queue pressure, dependencies, deadlines and ignored cancellation with a scripted provider. The published latencies measure this simulation. [Replay results](benchmarks/results/phase4a-runtime.md)
 
-The next integration is a server-side DeepSeek streaming adapter for text and terminal usage, followed by opt-in bounded evidence for a vision-capable model. Optional TTS would consume only coordinator-authorized output. [Adapter requirements](docs/phase4a-duplex-runtime.md#next-adapters)
+## Opt-in streaming text model
+
+The Lab defaults to Mock. The local Node gateway supports the documented DeepSeek and OpenAI Chat Completions stream profiles; it also serves the three built pages, including the optional local perception experiment, behind an explicit static allowlist and page-specific CSP. Build with `npm run build`, configure the server credentials and spending controls, then run `npm run gateway`. On the gateway-served Lab, enter the separate local access token to enable real mode. Only explicitly submitted user text and triggered synthetic monitor events can make billable requests.
+
+Run `npm run gateway:fixture` to compare FIFO and SemanticStream over local SSE with zero paid calls. For a live smoke test, configure the gateway and explicitly launch `SS_RUN_REAL_SMOKE=YES npm run gateway:smoke`. Use `-- --compare` to run both strategies at the same model, capacity and limits. [Setup, limits and deployment assessment](docs/real-streaming-provider.md)
+
 
 ## Lightweight visual perception (Phase 4P.1)
 
@@ -180,7 +185,7 @@ Tests cover:
 - Inference snapshot ownership, queue/dependency behavior, stale partial suppression, terminal evidence, reservations and deterministic replay across four scheduler/capacity combinations.
 - Perception geometry/letterbox mapping, fixed/adaptive trigger, bounded latest-frame queue, and latency/FPS/drop metrics.
 
-GitHub Actions runs install, typecheck, all tests, the four replay suites, and the three-page static build (visual demo, runtime lab, perception experiment). For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. No Cloudflare bindings are required.
+GitHub Actions runs install, typecheck, all tests, the four replay suites, and the three-page static build (visual demo, runtime lab, perception experiment). For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. The static build contains the three pages and the generated self-hosted Wasm; the model is fetched from its pinned Google Storage URL only after opt-in. No Cloudflare bindings are required. The static build also emits `public/_headers` for Cloudflare Pages: it sets `application/wasm` for the self-hosted MediaPipe files and a page-specific `/perception.html` CSP. If a custom CSP is used, mirror the policy in [the gateway deployment notes](docs/real-streaming-provider.md) instead of weakening the runtime page: it needs `wasm-unsafe-eval`, `worker-src`, and `connect-src https://storage.googleapis.com`.
 
 ### Browser checklist
 

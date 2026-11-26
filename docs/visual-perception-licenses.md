@@ -29,7 +29,7 @@ Catalog entry point: https://ai.google.dev/edge/mediapipe/solutions/vision/objec
 
 ## Deployment limits
 
-- The runtime Wasm is served same-origin in this repository. A strict CSP needs a policy that permits WebAssembly and the worker, for example `script-src 'self' 'wasm-unsafe-eval'` and `worker-src 'self'`. Test the final CSP in the deployment host.
+- The runtime Wasm is served same-origin in this repository. The Node gateway serves it with `application/wasm` and applies the perception-only CSP; the static build includes `public/_headers` with the same Wasm MIME and page CSP for Cloudflare Pages. A strict CSP needs `script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self'`, and `connect-src 'self' https://storage.googleapis.com` (the last only for model download). Test the final CSP in the deployment host.
 - The model is fetched from `https://storage.googleapis.com` when the user enables detection. If the deployment must be offline, download the model and change `EFFICIENTDET_MODEL_URL` to a same-origin path **only after confirming redistribution rights** and retaining the model's source/version record. A strict `connect-src` must then allow the chosen origin.
 - Camera requires a secure context (HTTPS or localhost) and a `Permissions-Policy` that allows camera for the page.
 - The worker is a module worker bundled by Vite. No cross-origin isolation is required for the CPU/Wasm path.
