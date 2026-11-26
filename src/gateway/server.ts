@@ -15,7 +15,7 @@ const MEDIA_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
   '.png': 'image/png', '.json': 'application/json', '.wasm': 'application/wasm',
 };
-const STATIC_FILES = /^(?:index\.html|runtime\.html|perception\.html|favicon\.png|assets\/[\w.-]+|benchmark\/[\w.-]+|mediapipe\/wasm\/vision_wasm_module_internal\.(?:js|wasm))$/;
+const STATIC_FILES = /^(?:index\.html|runtime\.html|perception\.html|favicon\.png|assets\/[\w.-]+|benchmark\/[\w.-]+|mediapipe\/wasm\/[0-9A-Za-z.-]+\/vision_wasm_module_internal\.(?:js|wasm))$/;
 const BASE_CSP = "default-src 'self'; object-src 'none'; base-uri 'self'; media-src 'self' blob:; "
   + "img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'";
 const PERCEPTION_CSP = "default-src 'self'; object-src 'none'; base-uri 'self'; media-src 'self' blob:; "
@@ -199,7 +199,7 @@ export function createGateway(config: GatewayConfig) {
       };
       const budget = ledger.snapshot();
       json(res, 200, { ...capabilities, budget: {
-        ...budget, quarantined: budget.held - active.size,
+        ...budget, quarantined: budget.held - active.size, slots: config.slots,
         requestLimit: config.maxRequests, limitNanoUsd: config.budgetNanoUsd,
         costPerRequestNanoUsd: config.inputReserve * config.inputNanoUsd + config.outputLimit * config.outputNanoUsd,
       } });

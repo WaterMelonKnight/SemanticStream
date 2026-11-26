@@ -13,6 +13,7 @@ export interface GatewayBudget {
   readonly held: number;
   readonly quarantined: number;
   readonly accepted: number;
+  readonly slots: number;
   readonly requestLimit: number;
   readonly limitNanoUsd: number;
   readonly costPerRequestNanoUsd: number;

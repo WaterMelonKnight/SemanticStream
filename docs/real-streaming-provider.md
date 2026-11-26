@@ -52,11 +52,11 @@ Run `npm run gateway` and open `http://127.0.0.1:4180/runtime.html`. The server 
 
 ### Static pages, CSP and the perception experiment
 
-- `.wasm` is served as `application/wasm`; model weights are **not** in `dist` and are not served by the gateway.
+- The versioned MediaPipe module path is served with native `.js`/`.wasm` MIME types; model weights are **not** in `dist` and are not served by the gateway.
 - `index.html` and `runtime.html` keep the original CSP (`default-src 'self'`; no `wasm-unsafe-eval`, no external connect).
 - `perception.html` gets a page-specific CSP that additionally permits `script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self' blob:`, and `connect-src 'self' https://storage.googleapis.com` for the optional EfficientDet-Lite0 download. No other cross-origin connect is allowlisted.
 - The perception model is fetched only after the user clicks **Enable model**. Media upload remains absent; the gateway's text API is the only path to a real text model.
-- The static build also emits `public/_headers` for Cloudflare Pages with `application/wasm` for the module Wasm and the same `/perception.html` CSP. Cloudflare Pages does not run the Node gateway, so its index/runtime pages stay in Mock mode unless another backend is explicitly configured.
+- The static build also emits `public/_headers` for Cloudflare Pages. It intentionally does not override MIME for the Wasm directory (native `.js`/`.wasm` types are used), scopes immutable caching to the versioned runtime path, and applies the same CSP to `/perception` and `/perception.html`. Cloudflare Pages does not run the Node gateway, so its index/runtime pages stay in Mock mode unless another backend is explicitly configured.
 - The gateway's text gateway and the perception detector are independent: the detector does not call the gateway, and the gateway does not proxy model weights. The comparison and smoke clients send no data until explicitly launched. [DeepSeek models and pricing](https://api-docs.deepseek.com/quick_start/pricing/)
 
 ## Evaluate

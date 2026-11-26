@@ -75,7 +75,25 @@
 - Validate the adapter without paid calls and provide explicit smoke commands for an operator-configured endpoint.
 - Quarantine attempts without reliable terminal evidence, preserve provisional costs and document operator reconciliation.
 
+## Phase 4O.0 · Deployment compatibility hardening
+
+- Remove the Wasm MIME wildcard that mislabeled MediaPipe JavaScript.
+- Version the self-hosted MediaPipe runtime path and scope immutable caching to that version.
+- Add the perception CSP to both `/perception` and `/perception.html` for Cloudflare pretty URLs, without weakening index/runtime.
+- Extend the Node gateway static allowlist for the exact versioned module files and apply worker-safe page-specific CSP.
+- Document the Cloudflare Pages route/header boundary and mark a real preview deployment as required before release.
+
+## Phase 4O · Runtime observability and cost dashboard
+
+- Audit existing core, perception, scheduler, runtime-task, gateway-ledger and Runtime Lab metrics; record units, lifecycle, sources, aggregation and gaps in `docs/runtime-observability.md`.
+- Add a bounded page-scoped telemetry protocol with counter, gauge, histogram and structured event records; explicit source and high-cardinality identity separation; JSON/CSV export; reset/session isolation.
+- Add a gateway cost panel using the authenticated `/api/runtime` budget: total/settled/reserved/provisional/available/utilization, accepted/limit, quarantined, frozen.
+- Keep polling low-frequency, visible-tab, non-overlapping and failure-isolated; label configured estimates versus vendor invoices and never show unknown cost as zero.
+- Show actual FPS, cache/transfer, queue/slots, task outcomes/reasons, P50/P95 latency, tokens, stale/blocked outputs and cost; keep perception and inference sessions explicitly separate.
+- Add unit tests for cost arithmetic, poll overlap/error handling, telemetry bounds/privacy/session isolation, and runtime summaries; add browser smoke for Mock, seeded-gateway and mobile layouts.
+
 ## Next · Deployed validation and additional modalities
+
 
 - Validate the gateway against a real, explicitly authorized endpoint and evaluate a Workers relay with durable shared admission.
 - Add opt-in image transfer to a vision-capable model using bounded snapshots and separate upload and provider budgets. Evaluate visual semantics separately from frame selection.

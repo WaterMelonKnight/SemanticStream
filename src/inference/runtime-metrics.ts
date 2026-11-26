@@ -1,5 +1,28 @@
 import type { RuntimeRecord, TaskSummary } from './scheduler';
 
+export interface RuntimeMeasurementSnapshot {
+  readonly id: number;
+  readonly requestId?: string;
+  readonly providerRequestId?: string;
+  readonly startedAtMs?: number;
+  readonly startDelayMs?: number;
+  readonly gatewayDispatchAtMs?: number;
+  readonly firstTextDelayMs?: number;
+  readonly upstreamFirstTextMs?: number;
+  readonly firstEffectiveDelayMs?: number;
+  readonly outputStopMs?: number;
+  readonly waitForTerminalAfterStopMs?: number;
+  readonly upstreamElapsedMs?: number;
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly usage: string;
+  readonly outcome: string;
+  readonly reason?: string;
+  readonly blocked: number;
+  readonly stale: number;
+  readonly unanswered: boolean;
+}
+
 interface Measurement {
   task: TaskSummary;
   end?: RuntimeRecord;
@@ -34,7 +57,7 @@ export class RuntimeMeasurements {
     if (row.staleOutput) details.stale += 1;
   }
 
-  snapshot(session?: number) {
+  snapshot(session?: number): RuntimeMeasurementSnapshot[] {
     return [...this.tasks.values()].filter(({ task }) => session === undefined || task.session === session)
       .map(({ task, end, terminal, first, dispatch, quarantine, blocked, stale }) => ({
         id: task.id,

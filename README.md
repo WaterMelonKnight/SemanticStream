@@ -2,7 +2,7 @@
 
 **Less data. More understanding.**
 
-SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 added a bounded history buffer and active retrieval. Phase 3A adds a task-aware, pluggable decision boundary. Phase 3R hardens session lifetimes, resource admission and replay while keeping the browser demo local. Phase 4P.1 adds an opt-in lightweight visual-perception experiment. See the [Phase 3R audit](docs/architecture-audit-phase3r.md) and [runtime architecture](docs/runtime-architecture-v2.md).
+SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 added a bounded history buffer and active retrieval. Phase 3A adds a task-aware, pluggable decision boundary. Phase 3R hardens session lifetimes, resource admission and replay while keeping the browser demo local. Phase 4P.1 adds an opt-in lightweight visual-perception experiment. Phase 4O adds a bounded runtime observability protocol and a gateway cost dashboard. See the [Phase 3R audit](docs/architecture-audit-phase3r.md) and [runtime architecture](docs/runtime-architecture-v2.md).
 
 The static demo runs locally in the browser and the benchmarks run in Node.js. Selected videos are read through local Object URLs. Phase 4A+1 adds an opt-in, text-only streaming gateway. Media stays local in both modes.
 
@@ -54,7 +54,23 @@ Open `/perception.html` for an independent experiment that turns a camera or loc
 
 The model/runtime licenses, exact versions, sizes, sources, CSP and deployment limits are in [docs/visual-perception-licenses.md](docs/visual-perception-licenses.md). Architecture, lifecycle, metrics definitions, and the future tracking/Object State Index design are in [docs/visual-perception.md](docs/visual-perception.md). Observed one-run browser numbers and device gaps are in [docs/visual-perception-results.md](docs/visual-perception-results.md).
 
+## Runtime observability and cost dashboard (Phase 4O)
+
+The Live Vision Runtime Lab is the local Control Center for scheduler, model, visual cache and gateway-cost telemetry.
+
+- Bounded, page-scoped `TelemetryHub`: counter/gauge/histogram/structured events, source labels (`mock`, `fixture`, `real`, `unavailable`), session/task/request/provider IDs, and bounded time series.
+- Cost panel uses the authenticated `GET /api/runtime` endpoint through `GatewayStreamingProvider.budget()`:
+  - total, settled, reserved, provisional, available, utilization;
+  - accepted / request limit, quarantined slots, admission frozen.
+- Costs are **configured-price estimates** in integer nano-USD, not vendor invoices. Mock mode shows `Unavailable`/`—`; unknown real cost is never displayed as zero.
+- Polling is 4 s, visible-tab only, non-overlapping, and failures are data only; inference never waits on a budget query.
+- JSON/CSV export is user-triggered and bounded. No API keys, tokens, prompts, images, video, raw model output or evidence payloads are recorded.
+- The Perception Lab is a separate runtime. Its telemetry and detector metrics are exported on `/perception.html`; the Runtime Lab does not fabricate one end-to-end session.
+
+Read [runtime observability](docs/runtime-observability.md) for the existing-metrics audit, protocol, critical-event reserve, source/cardinality rules, metric-vs-trace OpenTelemetry boundary, admission states, deployment verification, and measured dashboard values.
+
 ## Bounded context buffer
+
 
 Each sampling session owns a bounded, local history of frames that were actually captured. It is not a video cache.
 
@@ -184,22 +200,23 @@ Tests cover:
 - Existing sampler, video lifecycle, Phase 1B fixtures/benchmark, timeline, rate, and formatting tests.
 - Inference snapshot ownership, queue/dependency behavior, stale partial suppression, terminal evidence, reservations and deterministic replay across four scheduler/capacity combinations.
 - Perception geometry/letterbox mapping, fixed/adaptive trigger, bounded latest-frame queue, and latency/FPS/drop metrics.
+- Telemetry critical-terminal reserve, session identity, LRU series capacity, sensitive filtering, JSON/CSV and metric-vs-trace OTel mapping; cost-generation invalidation, frozen/cost/request/slot admission states, non-overlap polling and error degradation; runtime outcome/latency summaries.
 
-GitHub Actions runs install, typecheck, all tests, the four replay suites, and the three-page static build (visual demo, runtime lab, perception experiment). For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. The static build contains the three pages and the generated self-hosted Wasm; the model is fetched from its pinned Google Storage URL only after opt-in. No Cloudflare bindings are required. The static build also emits `public/_headers` for Cloudflare Pages: it sets `application/wasm` for the self-hosted MediaPipe files and a page-specific `/perception.html` CSP. If a custom CSP is used, mirror the policy in [the gateway deployment notes](docs/real-streaming-provider.md) instead of weakening the runtime page: it needs `wasm-unsafe-eval`, `worker-src`, and `connect-src https://storage.googleapis.com`.
+GitHub Actions runs install, typecheck, all tests, the four replay suites, and the three-page static build (visual demo, runtime lab, perception experiment). For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. The static build contains the three pages and the generated self-hosted Wasm; the model is fetched from its pinned Google Storage URL only after opt-in. No Cloudflare bindings are required. The static build also emits `public/_headers` for Cloudflare Pages: it relies on native `.js`/`.wasm` MIME types, scopes an immutable cache to the versioned runtime path, and applies two independent complete CSP rule blocks to `/perception` and `/perception.html`. If a custom CSP is used, mirror the policy in [the gateway deployment notes](docs/real-streaming-provider.md) instead of weakening the runtime page: it needs `wasm-unsafe-eval`, `worker-src`, and `connect-src https://storage.googleapis.com`.
 
 ### Browser checklist
 
-The built pages were exercised in headless Chromium. The visual page covered timeline retrieval, region crop, eviction error, retrieval budget denial, task selection/ROI editing, live decision log and gate, and all benchmark panels. The perception page covered optional model load, detection, video seek/restart, live metrics, the two-phase benchmark, model unload, and a 390 px viewport with no horizontal overflow. CI does not install a browser. Before a release, also check on real devices:
+The built pages were exercised in headless Chromium. The visual page covered timeline retrieval, region crop, eviction error, retrieval budget denial, task selection/ROI editing, live decision log and gate, and all benchmark panels. The perception page covered optional model load, detection, video seek/restart, live metrics, the two-phase benchmark, model unload, and a 390 px viewport with no horizontal overflow. The Runtime Lab was checked in Mock mode (cost unavailable), with a seeded gateway ledger (cost/utilization/quarantine), and at 390 px with no horizontal overflow. CI does not install a browser. Before a release, also check on real devices:
 
 1. iPhone Safari: select a camera-roll MP4, play/pause/seek, click a recent timeline column, and crop a region.
 2. Android Chrome: switch video files while playing, then retrieve a frame from the new session; confirm the old session is rejected as `wrong-session`.
 3. Background/restore the tab and confirm capture and the bounded buffer resume without a burst.
-4. Rotate a narrow phone and check the timeline, retrieval panel, task panel, decision log, and benchmark cards.
+4. Rotate a narrow phone and check the timeline, retrieval panel, task panel, decision log, observability/cost panels, and benchmark cards.
 5. Perception page: enable the model on a real iPhone Safari and Android Chrome, grant/deny camera permission, run the 2 × 8 s comparison, and record load time, P50/P95, drops, thermal throttling, and battery use. These real-device checks are not available in this environment.
 
 ## Documentation
 
-Read [ARCHITECTURE.md](ARCHITECTURE.md) for contracts, bounded buffer semantics, budgets, retrieval statuses, decision boundaries, benchmark isolation, and ownership; [docs/decision-model-integration.md](docs/decision-model-integration.md) for future model adapters; [docs/visual-perception.md](docs/visual-perception.md) for the Phase 4P.1 experiment; [ROADMAP.md](ROADMAP.md) for phase status; and [AGENTS.md](AGENTS.md) for coding-agent handoff.
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for contracts, bounded buffer semantics, budgets, retrieval statuses, decision boundaries, benchmark isolation, and ownership; [docs/decision-model-integration.md](docs/decision-model-integration.md) for future model adapters; [docs/visual-perception.md](docs/visual-perception.md) for the Phase 4P.1 experiment; [docs/runtime-observability.md](docs/runtime-observability.md) for Phase 4O telemetry/cost; [ROADMAP.md](ROADMAP.md) for phase status; and [AGENTS.md](AGENTS.md) for coding-agent handoff.
 
 ## License
 
