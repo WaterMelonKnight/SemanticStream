@@ -9,9 +9,11 @@ import { VideoSource, videoFileProblem } from './visual/video-source';
 import type { VideoSourceStatus } from './visual/video-source';
 import { drawLetterboxed, createSourceTransform, mapModelBoxToSource } from './perception/geometry';
 import { LongTaskMonitor, PerceptionMetrics } from './perception/metrics';
+import type { PerceptionStats } from './perception/types';
 import { MediaPipeObjectDetectorProvider } from './perception/provider';
 import type { ObjectDetectorProvider } from './perception/provider';
 import { DetectionTrigger } from './perception/scheduler';
+import { isCurrentDetectionResult } from './perception/session';
 import { TelemetryHub } from './observability/telemetry';
 import type { TelemetryEvent, TelemetrySource } from './observability/types';
 import {
@@ -125,6 +127,14 @@ const staleStat = element('stat-stale');
 const longTaskStat = element('stat-longtasks');
 const loadStat = element('stat-load');
 const modelStat = element('stat-model');
+const fps5sStat = element('stat-fps-5s');
+const inputFps5sStat = element('stat-input-fps-5s');
+const submittedStat = element('stat-submitted');
+const queueLatencyStat = element('stat-queue-latency');
+const triggerStat = element('stat-triggers');
+const visibilityStat = element('stat-visibility');
+const pageStateStat = element('stat-state');
+const longTaskRateStat = element('stat-longtask-rate');
 const observationBody = element<HTMLTableSectionElement>('observations');
 const detectionStatus = element('detection-status');
 const telemetryStatus = element('perception-telemetry-status');
@@ -170,8 +180,11 @@ let lastStatsAt = 0;
 let benchmarkRunning = false;
 let benchmarkAbort = false;
 let benchmarkPhases: BenchmarkPhase[] = [];
+let foreground = !document.hidden;
+let cameraStartVersion = 0;
+let statsTimer: number | undefined;
 
-const metrics = new PerceptionMetrics(performance.now());
+const metrics = new PerceptionMetrics(performance.now(), foreground);
 const telemetry = new TelemetryHub(320, 120);
 let lastTelemetryAt = 0;
 const longTasks = new LongTaskMonitor();
@@ -286,10 +299,13 @@ function renderPerceptionTelemetry(): void {
   telemetryStatus.dataset.state = modelReady ? 'ok' : modelState === 'error' ? 'error' : 'idle';
   const summary = [
     'session · ' + (sessionId || 'none') + ' · source ' + (sourceKind ?? 'none') + ' · model ' + EFFICIENTDET_MODEL_LABEL,
-    'detection · ' + stats.effectiveFps.toFixed(2) + ' fps · ' + stats.batches + ' batches · ' + stats.observations + ' observations',
+    'detection · ' + stats.effectiveFps.toFixed(2) + ' fps cumulative · ' + stats.recentDetectionFps.toFixed(2) + ' fps 5s',
+    'input · ' + stats.recentInputFps.toFixed(2) + ' fps 5s · submitted/completed ' + stats.submitted + '/' + stats.batches,
+    'queue · P50 ' + formatMs(stats.queueLatency.p50Ms) + ' · P95 ' + formatMs(stats.queueLatency.p95Ms) + ' · triggers ' + formatTriggerCounts(stats.triggerReasons),
     'latency · P50 ' + formatMs(stats.latency.p50Ms) + ' · P95 ' + formatMs(stats.latency.p95Ms),
     'drops · ' + stats.droppedQueue + ' queue · ' + stats.droppedStale + ' stale · ' + stats.skippedNotReady + ' not ready',
-    'page · long tasks ' + stats.longTasks + ' / ' + formatMs(stats.maxLongTaskMs) + ' · telemetry ' + snap.events.length + ' events / ' + snap.series.length + ' series',
+    'visibility · foreground ' + formatDuration(stats.foregroundMs) + ' · background ' + formatDuration(stats.backgroundMs) + ' · ' + performanceState(stats),
+    'page · long tasks ' + stats.longTasks + ' / ' + formatMs(stats.maxLongTaskMs) + ' · ' + stats.longTasksPerMinute.toFixed(1) + '/min · telemetry ' + snap.events.length + ' events / ' + snap.series.length + ' series',
   ];
   telemetrySummary.replaceChildren(...summary.map((text) => {
     const item = document.createElement('li'); item.textContent = text; return item;
@@ -312,6 +328,16 @@ function recordPerceptionGauges(now: number): void {
   const source = telemetrySource();
   const identity = sessionId ? { sessionId } : {};
   telemetry.gauge(now, 'perception', 'detection_fps', stats.effectiveFps, 'fps', source, identity);
+  telemetry.gauge(now, 'perception', 'detection_fps_5s', stats.recentDetectionFps, 'fps', source, identity);
+  telemetry.gauge(now, 'perception', 'input_fps_5s', stats.recentInputFps, 'fps', source, identity);
+  telemetry.gauge(now, 'perception', 'submitted', stats.submitted, 'requests', source, identity);
+  telemetry.gauge(now, 'perception', 'foreground_ms', stats.foregroundMs, 'ms', source, identity);
+  telemetry.gauge(now, 'perception', 'background_ms', stats.backgroundMs, 'ms', source, identity);
+  telemetry.gauge(now, 'perception', 'long_tasks_per_minute', stats.longTasksPerMinute, 'per_minute', source, identity);
+  if (stats.queueLatency.p50Ms !== null) telemetry.histogram(now, 'perception', 'queue_p50_ms', stats.queueLatency.p50Ms, 'ms', source, identity);
+  for (const [reason, count] of Object.entries(stats.triggerReasons)) {
+    telemetry.gauge(now, 'perception', 'trigger_' + reason, count, 'count', source, identity);
+  }
   telemetry.gauge(now, 'perception', 'batches', stats.batches, 'count', source, identity);
   telemetry.gauge(now, 'perception', 'observations', stats.observations, 'count', source, identity);
   if (stats.latency.p50Ms !== null) telemetry.histogram(now, 'perception', 'inference_p50_ms', stats.latency.p50Ms, 'ms', source, identity);
@@ -344,6 +370,7 @@ function beginSession(kind: SourceKind): void {
 }
 
 function stopSources(): void {
+  cameraStartVersion += 1;
   camera?.dispose();
   camera = undefined;
   video?.dispose();
@@ -393,6 +420,7 @@ function submitDetection(request: DetectionRequest, pixels: ArrayBuffer): void {
     pending = { request, pixels };
     return;
   }
+  metrics.recordSubmitted();
   inFlight = {
     request,
     startedAt: performance.now(),
@@ -413,11 +441,12 @@ function submitDetection(request: DetectionRequest, pixels: ArrayBuffer): void {
 
 function handleDetection(result: DetectionResponse): void {
   const request = inFlight?.request;
+  const startedAtMs = inFlight?.startedAt;
   if (inFlight) {
     window.clearTimeout(inFlight.timeout);
     inFlight = null;
   }
-  if (!request || result.requestId !== request.requestId || result.sessionId !== sessionId) {
+  if (!request || !isCurrentDetectionResult(result, request, sessionId)) {
     metrics.recordStale();
     const next = pending;
     pending = null;
@@ -452,7 +481,7 @@ function handleDetection(result: DetectionResponse): void {
     },
   }));
   observations = [...batch, ...observations].slice(0, MAX_OBSERVATIONS);
-  metrics.recordBatch(result.inferenceMs, batch.length, completedAtMs);
+  metrics.recordBatch(result.inferenceMs, batch.length, completedAtMs, startedAtMs === undefined ? 0 : startedAtMs - request.submittedAtMs);
   telemetry.histogram(completedAtMs, 'perception', 'inference_ms', result.inferenceMs, 'ms', 'real', { sessionId });
   telemetry.counter(completedAtMs, 'perception', 'detection_batch', 1, 'real', { sessionId });
   if (batch.length) telemetry.counter(completedAtMs, 'perception', 'observations', batch.length, 'real', { sessionId });
@@ -534,13 +563,42 @@ function renderObservations(): void {
   }
 }
 
+
+function formatDuration(ms: number): string {
+  if (ms < 1_000) return `${Math.round(ms)} ms`;
+  if (ms < 60_000) return `${(ms / 1_000).toFixed(1)} s`;
+  return `${(ms / 60_000).toFixed(1)} min`;
+}
+
+function formatTriggerCounts(counts: PerceptionStats['triggerReasons']): string {
+  const entries = Object.entries(counts).filter(([, count]) => count > 0);
+  return entries.length ? entries.map(([reason, count]) => `${reason} ${count}`).join(' · ') : '—';
+}
+
+function performanceState(stats: PerceptionStats): string {
+  if (!stats.visible) return 'background · camera released';
+  if (stats.recentInputFps < 0.5) return 'foreground · no input';
+  if ((stats.queueLatency.p95Ms ?? 0) > 50) return 'foreground · queue-limited';
+  const target = readTriggerConfig().targetFps;
+  if (stats.recentDetectionFps < target * 0.75) return 'foreground · trigger-limited';
+  return 'foreground · active';
+}
+
 function renderStats(force = false): void {
   const now = performance.now();
   if (!force && now - lastStatsAt < 250) return;
   lastStatsAt = now;
   const stats = metrics.snapshot(now, longTasks.count, longTasks.maxMs);
   fpsStat.textContent = formatFps(stats.effectiveFps);
+  fps5sStat.textContent = formatFps(stats.recentDetectionFps);
+  inputFps5sStat.textContent = formatFps(stats.recentInputFps);
   batchStat.textContent = String(stats.batches);
+  submittedStat.textContent = `${stats.submitted} / ${stats.batches}`;
+  queueLatencyStat.textContent = `${formatMs(stats.queueLatency.p50Ms)} / ${formatMs(stats.queueLatency.p95Ms)}`;
+  triggerStat.textContent = formatTriggerCounts(stats.triggerReasons);
+  visibilityStat.textContent = `FG ${formatDuration(stats.foregroundMs)} / BG ${formatDuration(stats.backgroundMs)}`;
+  pageStateStat.textContent = performanceState(stats);
+  longTaskRateStat.textContent = longTasks.supported ? `${stats.longTasksPerMinute.toFixed(1)}/min` : 'unavailable';
   observationStat.textContent = String(stats.observations);
   p50Stat.textContent = formatMs(stats.latency.p50Ms);
   p95Stat.textContent = formatMs(stats.latency.p95Ms);
@@ -564,7 +622,8 @@ function updateFrameStatus(frame: StreamFrame<VisualFrame>): void {
 }
 
 function onFrame(frame: StreamFrame<VisualFrame>): void {
-  if (!sessionId) return;
+  if (!sessionId || !foreground) return;
+  metrics.recordInput(frame.timestampMs);
   const probe = readProbe();
   lastChangePercent = lastProbe ? meanRgbDifference(lastProbe, probe) : 100;
   lastProbe = probe;
@@ -574,6 +633,7 @@ function onFrame(frame: StreamFrame<VisualFrame>): void {
     return;
   }
   const decision = trigger.shouldSubmit(frame.timestampMs, lastChangePercent);
+  metrics.recordTrigger(decision.reason);
   if (!decision.submit) return;
   trigger.markSubmitted(frame.timestampMs, lastChangePercent);
   const request = prepareDetection(frame);
@@ -656,6 +716,7 @@ function disableModel(): void {
 function startCamera(): void {
   if (benchmarkRunning) return;
   stopSources();
+  const startVersion = ++cameraStartVersion;
   sourceKind = 'camera';
   beginSession('camera');
   const source = new CameraSource(media, feed, (message) => {
@@ -671,11 +732,14 @@ function startCamera(): void {
   setStatus('Waiting for camera permission…', 'idle');
   updateSourceButtons();
   void source.start(onFrame).then(() => {
-    if (camera !== source) return;
+    if (camera !== source || startVersion !== cameraStartVersion || document.hidden) {
+      source.dispose();
+      return;
+    }
     setStatus('Camera running · frames stay in this browser', 'ok');
     updateSourceButtons();
   }).catch((error: unknown) => {
-    if (camera !== source) return;
+    if (camera !== source || startVersion !== cameraStartVersion) return;
     source.dispose();
     camera = undefined;
     sourceKind = null;
@@ -744,6 +808,7 @@ function startDemo(): void {
 
 function stopCamera(): void {
   if (!camera) return;
+  cameraStartVersion += 1;
   camera.dispose();
   camera = undefined;
   sourceKind = null;
@@ -878,6 +943,76 @@ element('perception-telemetry-clear').addEventListener('click', () => { telemetr
 benchmarkRun.addEventListener('click', () => void runBenchmark());
 benchmarkCancel.addEventListener('click', () => { benchmarkAbort = true; });
 
+
+function startStatsTimer(): void {
+  if (statsTimer !== undefined) window.clearInterval(statsTimer);
+  statsTimer = window.setInterval(() => renderStats(), 500);
+}
+
+function handleVisibilityChange(): void {
+  const visible = !document.hidden;
+  foreground = visible;
+  metrics.setVisible(visible, performance.now());
+  telemetry.event(performance.now(), 'perception', visible ? 'foreground' : 'background', telemetrySource(),
+    sessionId ? { sessionId } : {});
+  if (visible) {
+    updateSourceButtons();
+    if (!sourceKind) setStatus('Camera paused while the page was hidden. Tap Start camera to resume.', 'warn');
+    return;
+  }
+  clearLateWork();
+  cameraStartVersion += 1;
+  if (camera) {
+    camera.dispose();
+    camera = undefined;
+    sourceKind = null;
+    setStatus('Camera paused while the page was hidden. Tap Start camera to resume.', 'warn');
+  } else if (video) {
+    video.pause();
+    setStatus('Video paused while the page was hidden. Tap Play video to resume.', 'warn');
+  } else if (demo) {
+    demo.stop();
+    demo = undefined;
+    sourceKind = null;
+    setStatus('Procedural scene paused while the page was hidden. Choose a source to resume.', 'idle');
+  }
+  setDetectionStatus('Detection paused while the page is hidden.', 'idle');
+  updateSourceButtons();
+}
+
+function handlePageHide(event: PageTransitionEvent): void {
+  benchmarkAbort = true;
+  foreground = false;
+  metrics.setVisible(false, performance.now());
+  cameraStartVersion += 1;
+  clearLateWork();
+  stopSources();
+  if (statsTimer !== undefined) window.clearInterval(statsTimer);
+  statsTimer = undefined;
+  provider?.dispose();
+  provider = undefined;
+  modelReady = false;
+  modelState = supportsPerception() ? 'idle' : 'unsupported';
+  modelLoadMs = null;
+  modelBytes = 0;
+  updateModelUi();
+  if (!event.persisted) longTasks.dispose();
+}
+
+function handlePageShow(event: PageTransitionEvent): void {
+  if (!event.persisted) return;
+  foreground = !document.hidden;
+  metrics.setVisible(foreground, performance.now());
+  startStatsTimer();
+  updateModelUi();
+  updateSourceButtons();
+  if (!sourceKind) setStatus('Camera stopped while away. Tap Start camera to resume.', 'warn');
+}
+
+startStatsTimer();
+document.addEventListener('visibilitychange', handleVisibilityChange);
+window.addEventListener('pagehide', handlePageHide);
+window.addEventListener('pageshow', handlePageShow);
 applyConfigLabels();
 updateModelUi();
 updateSourceButtons();
@@ -885,19 +1020,3 @@ renderObservations();
 renderStats(true);
 setStatus('Choose a source. Detection is off until you enable the model.', 'idle');
 setDetectionStatus('Detection off by default.', 'idle');
-const statsTimer = setInterval(() => renderStats(), 500);
-
-window.addEventListener('pagehide', (event) => {
-  if (event.persisted) return;
-  benchmarkAbort = true;
-  provider?.dispose();
-  provider = undefined;
-  stopSources();
-  window.clearInterval(statsTimer);
-  longTasks.dispose();
-});
-
-window.addEventListener('pageshow', (event) => {
-  if (!event.persisted) return;
-  updateSourceButtons();
-});

@@ -46,6 +46,7 @@ let sourceVersion = 0;
 let monitor: MonitorSource | undefined;
 let procedural: ProceduralSource | undefined;
 let camera: CameraSource | undefined;
+let cameraStartVersion = 0;
 let video: VideoSource | undefined;
 let pendingScenario: { label: string; critical: boolean } | undefined;
 let lastFilterAt = -Infinity;
@@ -180,6 +181,7 @@ function resetSampling(): void {
 }
 
 function stopSource(): void {
+  cameraStartVersion += 1;
   monitor?.stop();
   monitor = undefined;
   procedural?.stop();
@@ -219,6 +221,7 @@ function useScene(original = false): void {
 
 async function useCamera(): Promise<void> {
   stopSource();
+  const startVersion = ++cameraStartVersion;
   resetSampling();
   const source = new CameraSource(media, feed, (message) => {
     useScene();
@@ -229,9 +232,13 @@ async function useCamera(): Promise<void> {
   status.textContent = 'Waiting for camera permission…';
   try {
     await source.start(processFrame);
-    if (camera === source) status.textContent = 'Camera running · video stays in this browser';
+    if (camera !== source || startVersion !== cameraStartVersion || document.hidden) {
+      source.dispose();
+      return;
+    }
+    status.textContent = 'Camera running · video stays in this browser';
   } catch (error) {
-    if (camera !== source) return;
+    if (camera !== source || startVersion !== cameraStartVersion) return;
     const message = error instanceof DOMException && error.name === 'NotAllowedError'
       ? 'Camera permission denied.' : error instanceof Error ? error.message : 'Camera could not start.';
     useScene();
@@ -696,6 +703,25 @@ function startCostPolling(): void {
     if (gateway && document.visibilityState === 'visible') void refreshCost();
   }, 4_000);
 }
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (camera) {
+      stopSource();
+      status.textContent = 'Camera paused while hidden. Tap Start camera to resume.';
+    } else if (video) {
+      video.pause();
+      status.textContent = 'Video paused while hidden. Tap Play video to resume.';
+    } else if (monitor || procedural) {
+      stopSource();
+      status.textContent = 'Visual source paused while hidden. Tap System monitor or Start camera to resume.';
+    }
+    sourceControls();
+    return;
+  }
+  sourceControls();
+  if (!camera && !monitor && !video) status.textContent = 'Camera stopped while away. Tap Start camera to resume.';
+});
 
 window.addEventListener('pagehide', () => {
   gatewayConnectGeneration += 1;

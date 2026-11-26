@@ -25,6 +25,40 @@ describe('perception metrics', () => {
     expect(stats.skippedNotReady).toBe(3);
     expect(stats.effectiveFps).toBeCloseTo(2.5, 5);
     expect(stats.longTasks).toBe(4);
+    expect(stats.submitted).toBe(0);
+    expect(stats.recentDetectionFps).toBeGreaterThan(0);
+    expect(stats.queueLatency.count).toBe(2);
+  });
+
+  it('tracks five-second rates, trigger reasons, submitted work, queue wait and visibility', () => {
+    const metrics = new PerceptionMetrics(0, true);
+    metrics.recordInput(100);
+    metrics.recordInput(900);
+    metrics.recordSubmitted(2);
+    metrics.recordTrigger('fixed');
+    metrics.recordTrigger('change');
+    metrics.recordTrigger('interval');
+    metrics.recordBatch(20, 1, 400, 5);
+    metrics.recordBatch(30, 1, 800, 8);
+    metrics.setVisible(false, 1_000);
+    const stats = metrics.snapshot(3_000, 6, 77);
+    expect(stats.submitted).toBe(2);
+    expect(stats.recentDetectionFps).toBeCloseTo(2 / 3, 5);
+    expect(stats.recentInputFps).toBeCloseTo(2 / 3, 5);
+    expect(stats.triggerReasons).toMatchObject({ fixed: 1, change: 1, interval: 1, periodic: 0, 'below-threshold': 0 });
+    expect(stats.queueLatency.p50Ms).toBe(5);
+    expect(stats.foregroundMs).toBe(1_000);
+    expect(stats.backgroundMs).toBe(2_000);
+    expect(stats.visible).toBe(false);
+    expect(stats.longTasksPerMinute).toBeCloseTo(120, 5);
+  });
+
+  it('preserves accumulated foreground time across a session reset', () => {
+    const metrics = new PerceptionMetrics(0, true);
+    metrics.reset(500);
+    const stats = metrics.snapshot(1_000, 0, null);
+    expect(stats.foregroundMs).toBe(1_000);
+    expect(stats.backgroundMs).toBe(0);
   });
 
   it('resets session counters without resetting external long-task state', () => {
