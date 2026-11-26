@@ -12,6 +12,8 @@ import { LongTaskMonitor, PerceptionMetrics } from './perception/metrics';
 import { MediaPipeObjectDetectorProvider } from './perception/provider';
 import type { ObjectDetectorProvider } from './perception/provider';
 import { DetectionTrigger } from './perception/scheduler';
+import { TelemetryHub } from './observability/telemetry';
+import type { TelemetryEvent, TelemetrySource } from './observability/types';
 import {
   DETECTOR_ID,
   EFFICIENTDET_MODEL_BYTES,
@@ -125,6 +127,9 @@ const loadStat = element('stat-load');
 const modelStat = element('stat-model');
 const observationBody = element<HTMLTableSectionElement>('observations');
 const detectionStatus = element('detection-status');
+const telemetryStatus = element('perception-telemetry-status');
+const telemetrySummary = element('perception-telemetry-summary');
+const telemetryEvents = element('perception-telemetry-events');
 const benchmarkRun = element<HTMLButtonElement>('benchmark-run');
 const benchmarkCancel = element<HTMLButtonElement>('benchmark-cancel');
 const benchmarkStatus = element('benchmark-status');
@@ -168,6 +173,8 @@ let benchmarkAbort = false;
 let benchmarkPhases: BenchmarkPhase[] = [];
 
 const metrics = new PerceptionMetrics(performance.now());
+const telemetry = new TelemetryHub(320, 120);
+let lastTelemetryAt = 0;
 const longTasks = new LongTaskMonitor();
 const trigger = new DetectionTrigger(readTriggerConfig());
 
@@ -251,6 +258,7 @@ function updateSourceButtons(): void {
 }
 
 function invalidateSession(): void {
+  if (sessionId) telemetry.event(systemClockNow(), 'perception', 'session_invalidated', telemetrySource(), { sessionId });
   sessionVersion += 1;
   sessionId = '';
   pending = null;
@@ -263,6 +271,62 @@ function invalidateSession(): void {
   overlayContext?.clearRect(0, 0, overlay.width, overlay.height);
   renderObservations();
   renderStats(true);
+}
+
+
+function systemClockNow(): number { return performance.now(); }
+
+function telemetrySource(): TelemetrySource {
+  return modelReady ? 'real' : modelState === 'error' ? 'unavailable' : 'mock';
+}
+
+function renderPerceptionTelemetry(): void {
+  const snap = telemetry.snapshot();
+  const stats = metrics.snapshot(performance.now(), longTasks.count, longTasks.maxMs);
+  telemetryStatus.textContent = modelReady ? 'Local model · real' : modelState === 'error' ? 'Local model · unavailable' : 'Local · model off';
+  telemetryStatus.dataset.state = modelReady ? 'ok' : modelState === 'error' ? 'error' : 'idle';
+  const summary = [
+    'session · ' + (sessionId || 'none') + ' · source ' + (sourceKind ?? 'none') + ' · model ' + EFFICIENTDET_MODEL_LABEL,
+    'detection · ' + stats.effectiveFps.toFixed(2) + ' fps · ' + stats.batches + ' batches · ' + stats.observations + ' observations',
+    'latency · P50 ' + formatMs(stats.latency.p50Ms) + ' · P95 ' + formatMs(stats.latency.p95Ms),
+    'drops · ' + stats.droppedQueue + ' queue · ' + stats.droppedStale + ' stale · ' + stats.skippedNotReady + ' not ready',
+    'page · long tasks ' + stats.longTasks + ' / ' + formatMs(stats.maxLongTaskMs) + ' · telemetry ' + snap.events.length + ' events / ' + snap.series.length + ' series',
+  ];
+  telemetrySummary.replaceChildren(...summary.map((text) => {
+    const item = document.createElement('li'); item.textContent = text; return item;
+  }));
+  telemetryEvents.replaceChildren(...snap.events.slice(-10).reverse().map((event) => {
+    const item = document.createElement('li'); item.textContent = formatTelemetryEvent(event); return item;
+  }));
+}
+
+function formatTelemetryEvent(event: TelemetryEvent): string {
+  return 't+' + (event.atMs / 1000).toFixed(2) + 's · ' + event.module + '/' + event.kind + ' · ' + event.name
+    + (event.value === undefined ? '' : ' ' + event.value + (event.unit ? ' ' + event.unit : ''))
+    + ' · ' + event.source + (event.sessionId ? ' · ' + event.sessionId : '');
+}
+
+function recordPerceptionGauges(now: number): void {
+  if (now - lastTelemetryAt < 1000) return;
+  lastTelemetryAt = now;
+  const stats = metrics.snapshot(now, longTasks.count, longTasks.maxMs);
+  const source = telemetrySource();
+  const identity = sessionId ? { sessionId } : {};
+  telemetry.gauge(now, 'perception', 'detection_fps', stats.effectiveFps, 'fps', source, identity);
+  telemetry.gauge(now, 'perception', 'batches', stats.batches, 'count', source, identity);
+  telemetry.gauge(now, 'perception', 'observations', stats.observations, 'count', source, identity);
+  if (stats.latency.p50Ms !== null) telemetry.histogram(now, 'perception', 'inference_p50_ms', stats.latency.p50Ms, 'ms', source, identity);
+  if (stats.latency.p95Ms !== null) telemetry.histogram(now, 'perception', 'inference_p95_ms', stats.latency.p95Ms, 'ms', source, identity);
+  telemetry.gauge(now, 'perception', 'queue_drops', stats.droppedQueue, 'count', source, identity);
+  telemetry.gauge(now, 'perception', 'stale_results', stats.droppedStale, 'count', source, identity);
+  telemetry.gauge(now, 'perception', 'long_tasks', stats.longTasks, 'count', source, identity);
+}
+
+function download(name: string, text: string, type: string): void {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const link = document.createElement('a');
+  link.href = url; link.download = name; link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function beginSession(kind: SourceKind): void {
@@ -391,6 +455,9 @@ function handleDetection(result: DetectionResponse): void {
   }));
   observations = [...batch, ...observations].slice(0, MAX_OBSERVATIONS);
   metrics.recordBatch(result.inferenceMs, batch.length, completedAtMs);
+  telemetry.histogram(completedAtMs, 'perception', 'inference_ms', result.inferenceMs, 'ms', 'real', { sessionId });
+  telemetry.counter(completedAtMs, 'perception', 'detection_batch', 1, 'real', { sessionId });
+  if (batch.length) telemetry.counter(completedAtMs, 'perception', 'observations', batch.length, 'real', { sessionId });
   drawObservations(batch);
   renderObservations();
   renderStats();
@@ -405,6 +472,7 @@ function handleDetection(result: DetectionResponse): void {
 
 function handleDetectionError(error: Error): void {
   if (!modelReady) return;
+  telemetry.event(systemClockNow(), 'perception', 'worker_failed', 'unavailable', { sessionId }, { reason: error.message.slice(0, 80) });
   if (inFlight) {
     window.clearTimeout(inFlight.timeout);
     inFlight = null;
@@ -486,6 +554,8 @@ function renderStats(force = false): void {
     : 'unavailable';
   loadStat.textContent = modelLoadMs === null ? '—' : `${modelLoadMs.toFixed(0)} ms`;
   modelStat.textContent = modelReady ? EFFICIENTDET_MODEL_LABEL : 'off';
+  recordPerceptionGauges(now);
+  renderPerceptionTelemetry();
 }
 
 function updateFrameStatus(frame: StreamFrame<VisualFrame>): void {
@@ -523,6 +593,7 @@ async function enableModel(): Promise<void> {
   modelError = '';
   modelState = 'loading';
   loadingStartedAt = performance.now();
+  telemetry.event(systemClockNow(), 'model', 'load_started', 'real', { sessionId }, { model: EFFICIENTDET_MODEL_VERSION });
   loadProgress.hidden = false;
   loadProgress.value = 0;
   loadProgress.max = EFFICIENTDET_MODEL_BYTES;
@@ -549,6 +620,8 @@ async function enableModel(): Promise<void> {
     modelLoadMs = performance.now() - loadingStartedAt;
     modelReady = true;
     modelState = 'ready';
+    telemetry.event(systemClockNow(), 'model', 'load_ready', 'real', { sessionId }, { model: EFFICIENTDET_MODEL_VERSION });
+    telemetry.histogram(systemClockNow(), 'model', 'load_ms', modelLoadMs, 'ms', 'real', { sessionId });
     loadProgress.hidden = true;
     updateModelUi();
     updateSourceButtons();
@@ -558,6 +631,7 @@ async function enableModel(): Promise<void> {
     modelState = 'error';
     modelError = error instanceof Error ? error.message : String(error);
     modelReady = false;
+    telemetry.event(systemClockNow(), 'model', 'load_failed', 'unavailable', { sessionId }, { reason: modelError.slice(0, 80) });
     provider?.dispose();
     provider = undefined;
     loadProgress.hidden = true;
@@ -568,6 +642,7 @@ async function enableModel(): Promise<void> {
 }
 
 function disableModel(): void {
+  telemetry.event(systemClockNow(), 'model', 'unloaded', 'unavailable', { sessionId });
   provider?.dispose();
   provider = undefined;
   modelReady = false;
@@ -802,6 +877,9 @@ modeSelect.addEventListener('change', updateSettings);
 targetFpsInput.addEventListener('input', updateSettings);
 periodicInput.addEventListener('input', updateSettings);
 changeInput.addEventListener('input', updateSettings);
+element('perception-telemetry-json').addEventListener('click', () => download('perception-telemetry.json', telemetry.exportJson(), 'application/json'));
+element('perception-telemetry-csv').addEventListener('click', () => download('perception-telemetry.csv', telemetry.exportCsv(), 'text/csv'));
+element('perception-telemetry-clear').addEventListener('click', () => { telemetry.clear(); renderPerceptionTelemetry(); });
 benchmarkRun.addEventListener('click', () => void runBenchmark());
 benchmarkCancel.addEventListener('click', () => { benchmarkAbort = true; });
 

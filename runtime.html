@@ -102,6 +102,58 @@
           <canvas id="historical" width="96" height="54" role="img" aria-label="Retrieved historical thumbnail"></canvas>
         </section>
       </div>
+
+      <section class="panel inset cost-panel" aria-labelledby="cost-title">
+        <div class="panel-heading">
+          <div>
+            <h2 id="cost-title">Gateway cost &amp; admission</h2>
+            <p class="note">Configured-price estimate from the server ledger. Not a vendor invoice.</p>
+          </div>
+          <span id="cost-state" class="status-pill" role="status">Unavailable</span>
+        </div>
+        <div class="cost-grid" id="cost-grid">
+          <div><span>Total budget</span><b id="cost-total">—</b></div>
+          <div><span>Settled</span><b id="cost-settled">—</b></div>
+          <div><span>Reserved</span><b id="cost-reserved">—</b></div>
+          <div><span>Provisional / unknown</span><b id="cost-provisional">—</b></div>
+          <div><span>Available</span><b id="cost-available">—</b></div>
+          <div><span>Utilization</span><b id="cost-utilization">—</b></div>
+          <div><span>Accepted / limit</span><b id="cost-accepted">—</b></div>
+          <div><span>Quarantined slots</span><b id="cost-quarantined">—</b></div>
+          <div><span>Admission</span><b id="cost-frozen">—</b></div>
+        </div>
+        <p id="cost-detail" class="note">Cost is unavailable while the Mock provider is active. Unknown real cost is never shown as zero.</p>
+        <div class="actions">
+          <button id="cost-refresh" type="button">Refresh cost</button>
+        </div>
+      </section>
+
+      <section class="panel inset observability-panel" id="observability" aria-labelledby="observability-title">
+        <div class="panel-heading">
+          <div>
+            <h2 id="observability-title">Unified runtime observability</h2>
+            <p class="note">This page's scheduler, model call, visual cache and cost records only. The Perception Lab is a separate runtime; its detector metrics are exported there.</p>
+          </div>
+          <span id="telemetry-state" class="status-pill" role="status">Mock · local</span>
+        </div>
+        <ul id="telemetry-summary" class="log"></ul>
+        <div class="observability-grid">
+          <div>
+            <h3>Recent telemetry</h3>
+            <ul id="telemetry-events" class="log"></ul>
+          </div>
+          <div>
+            <h3>Bounded series</h3>
+            <ul id="telemetry-series" class="log"></ul>
+          </div>
+        </div>
+        <div class="actions">
+          <button id="telemetry-json" type="button">Export JSON</button>
+          <button id="telemetry-csv" type="button">Export CSV</button>
+          <button id="telemetry-clear" type="button">Clear telemetry</button>
+        </div>
+      </section>
+
       <section class="panel inset">
         <h2>Request measurements</h2>
         <p id="metric-scope" class="note"></p>

@@ -146,6 +146,24 @@
         <div id="benchmark-results" class="benchmark-results">Run the comparison after enabling the model and starting a source.</div>
       </section>
 
+
+      <section class="panel telemetry-panel" aria-labelledby="perception-telemetry-title">
+        <div class="panel-heading">
+          <div>
+            <h2 id="perception-telemetry-title">Perception telemetry</h2>
+            <p class="note">This is a separate local perception runtime. Scheduler, model-call and gateway-cost telemetry live in the <a href="./runtime.html#observability">Runtime Lab Control Center</a>. No pixels, prompts or model output are recorded here.</p>
+          </div>
+          <span id="perception-telemetry-status" class="status-pill" role="status">Local · model off</span>
+        </div>
+        <ul id="perception-telemetry-summary" class="data-list"></ul>
+        <ul id="perception-telemetry-events" class="data-list telemetry-events"></ul>
+        <div class="model-actions">
+          <button id="perception-telemetry-json" type="button">Export JSON</button>
+          <button id="perception-telemetry-csv" type="button">Export CSV</button>
+          <button id="perception-telemetry-clear" type="button">Clear telemetry</button>
+        </div>
+      </section>
+
       <section class="panel notes-panel">
         <h2>What this experiment does and does not do</h2>
         <ul>

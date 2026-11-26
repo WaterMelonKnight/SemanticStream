@@ -2,7 +2,7 @@
 
 ## Scope
 
-SemanticStream is adaptive context streaming infrastructure for real-time AI agents. Phase 0 is a browser-only visual loop with a procedural source and a mock receiver. Phase 1A adds a local video source behind the same stream contract. Phase 1B adds block-local and hybrid adaptive policies plus a deterministic budget-aware replay benchmark. Phase 2 adds a bounded context buffer, active retrieval, and a separate/combined resource budget. Phase 3A adds a typed task-aware decision boundary and unified ex-ante admission for adaptive real-time sends plus retrieval. Phase 4P.1 adds an isolated, opt-in browser perception experiment. Keep changes scoped to the current phase or the requested task.
+SemanticStream is adaptive context streaming infrastructure for real-time AI agents. Phase 0 is a browser-only visual loop with a procedural source and a mock receiver. Phase 1A adds a local video source behind the same stream contract. Phase 1B adds block-local and hybrid adaptive policies plus a deterministic budget-aware replay benchmark. Phase 2 adds a bounded context buffer, active retrieval, and a separate/combined resource budget. Phase 3A adds a typed task-aware decision boundary and unified ex-ante admission for adaptive real-time sends plus retrieval. Phase 4P.1 adds an isolated, opt-in browser perception experiment. Phase 4O adds bounded runtime telemetry and a gateway cost dashboard. Keep changes scoped to the current phase or the requested task.
 
 ## Entry points
 
@@ -16,7 +16,7 @@ SemanticStream is adaptive context streaming infrastructure for real-time AI age
 - `src/visual/video-source.ts` owns the video element, Object URL, frame callbacks, seek/load reset, and deduplication. `src/visual/source.ts` owns the procedural adapter. `src/visual/camera-source.ts` owns the camera stream and tracks.
 - `perception.html`, `src/perception.ts`, and `src/perception/` own the Phase 4P.1 experiment: `ObjectDetectorProvider`, the MediaPipe worker, 320 × 320 input preparation, bounded queue, fixed/adaptive trigger, `ObjectObservation`, lifecycle, and browser metrics. Reuse `CameraSource`/`VideoSource`; do not refactor the Phase 4A scheduler, provider, or runtime lab for this experiment.
 - Find Canvas capture, thumbnail preparation, and the mock sink in `src/visual/`. The browser entry point is `src/main.ts`; the timeline renderer is `src/ui/timeline-view.ts`.
-- `src/inference/` owns streaming task lifecycle, output eligibility, snapshots and the browser gateway adapter. `src/gateway/` owns authenticated Node request admission, vendor SSE profiles and the persistent cost ledger.
+- `src/inference/` owns streaming task lifecycle, output eligibility, snapshots and the browser gateway adapter. `src/gateway/` owns authenticated Node request admission, vendor SSE profiles and the persistent cost ledger. `src/observability/` owns the bounded page-scoped telemetry protocol, cost view, non-overlap budget polling and runtime summary helpers.
 - Keep core, policy, timeline, rate, and benchmark tests runnable in Node.js. Keep Canvas, video, DOM, and animation scheduling in the browser layer.
 
 ## Working agreements
@@ -44,6 +44,12 @@ SemanticStream is adaptive context streaming infrastructure for real-time AI age
 - Describe frame counts as frame counts. Document event misses and the exact timing boundaries of latency, timeline capacity, and rate windows.
 - Keep visual data local by default. Build a static site with no credentials, uploads, or service dependencies.
 
-See [runtime architecture v2](docs/runtime-architecture-v2.md) for time, lifecycle and action semantics.
+See [runtime architecture v2](docs/runtime-architecture-v2.md) for time, lifecycle and action semantics and [runtime observability](docs/runtime-observability.md) for the metrics audit, telemetry protocol, cost boundary and OpenTelemetry extension point.
 
-Run `npm ci`, `npm run typecheck`, `npm run test`, `npm run benchmark` (Phase 1B, 2, 3A and 4A), and `npm run build` before submitting. `npm run build` runs `prebuild` and copies the self-hosted MediaPipe Wasm assets. Use `npm run preview` to verify all three pages when browser automation is available. For perception, check model opt-in, worker load, detection, video seek/restart, camera stop if available, model unload, and the two-phase benchmark. Report real-device gaps; do not claim iPhone/Android testing without it. Submit changes on a separate branch without merging unless requested.
+## Observability and deployment guardrails
+
+- Keep telemetry page-scoped and bounded; never add a global unbounded event bus. High-cardinality IDs stay out of metric attributes. Do not record credentials, prompts, raw conversation, media, evidence payloads or model output. Do not fake one end-to-end session across the independent perception and inference pages.
+- Cost is a configured-price ledger estimate, not a vendor invoice. Mock/unavailable cost must display unavailable, never zero. Budget polling must stay low-frequency, visibility-aware and non-overlapping; a failed poll cannot block or fail inference.
+- Keep MediaPipe Wasm under a versioned path; do not use a directory-wide MIME override. The perception CSP must remain page-specific and apply to both `/perception` and `/perception.html` on Cloudflare.
+
+Run `npm ci`, `npm run typecheck`, `npm run test`, `npm run benchmark` (Phase 1B, 2, 3A, 4A and gateway fixtures), and `npm run build` before submitting. `npm run build` runs `prebuild` and copies the self-hosted MediaPipe Wasm assets. Use `npm run preview` to verify all three pages when browser automation is available. For perception, check model opt-in, worker load, detection, video seek/restart, camera stop if available, model unload, and the two-phase benchmark. Report real-device gaps; do not claim iPhone/Android testing without it. Submit changes on a separate branch without merging unless requested.

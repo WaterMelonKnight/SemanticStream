@@ -217,6 +217,28 @@ D is not guaranteed to beat the baselines. It misses the capture-pause visible e
 
 The corrected artifacts are `benchmarks/results/phase3a-corrected.{json,csv,md}` and `public/benchmark/phase3a-corrected.json`. They track actual replay delivery times and spatial coverage. The historical reports remain available.
 
+## Phase 4O · Runtime observability and cost
+
+`src/observability/` defines a page-scoped, transport-neutral telemetry protocol: bounded events, counter/gauge/histogram records, bounded series, explicit source provenance (`mock`, `fixture`, `real`, `unavailable`), and separate high-cardinality identity fields. It is not a global event bus and is not shared between pages.
+
+The Runtime Lab now renders a server cost view from the authenticated `GET /api/runtime` through `GatewayStreamingProvider.budget()`:
+
+- integer nano-USD internally; USD only at the display edge;
+- total/settled/reserved/provisional/available/utilization;
+- accepted/request limit, quarantined slots, admission frozen;
+- configured-price estimate, explicitly not a vendor invoice;
+- unavailable/stale states shown as unavailable, never as zero;
+- 4 s visible-tab, non-overlapping polling; network failure is returned as data and cannot block inference.
+
+The unified panel includes FPS, cache/transfer, queue/slots, task outcomes/reasons, P50/P95 first-text/effective/upstream latency, known/unknown token usage, stale/blocked output counts, and the cost snapshot. Perception and inference are separate runtimes; the Perception Lab exports its own detector/model telemetry and the Runtime Lab explicitly labels the separation. Exports are user-triggered, bounded JSON/CSV. No prompts, media, credentials, raw model output or evidence payloads are recorded. `telemetryToOpenTelemetryHint` is the design boundary for a future opt-in exporter; no collector or external monitoring platform is deployed.
+
+Deployment hardening (Phase 4O.0):
+
+- MediaPipe runtime files live under the versioned `mediapipe/wasm/1.2.3/` path; the cache is immutable only for that version.
+- `public/_headers` no longer overrides MIME for the whole Wasm directory. Native JavaScript/Wasm MIME is used; `_headers` scopes caching and the `/perception` + `/perception.html` CSP.
+- The Node gateway serves the versioned module Wasm with `application/wasm`, scopes CSP to HTML documents (so the worker inherits the page policy), and keeps model weights out of the static allowlist.
+- Cloudflare Pages serves the three static pages, the generated versioned Wasm and the page-specific CSP; the Node gateway is not part of the static Cloudflare deployment.
+
 ## Concurrency, ownership, and measurement
 
 Capture, thumbnail preparation, sampling decisions and sink copies run synchronously on the browser main thread. Task proposal supervision is asynchronous and scoped to the session. There is no frame queue or catch-up work. A busy sink can decline a candidate via its return value. A slow synchronous sink delays the animation or video callback and can reduce the capture rate for both branches. Future asynchronous sinks will need explicit ownership transfer and a bounded overflow policy.
@@ -263,6 +285,6 @@ The self-hosted Wasm assets are copied from `node_modules` by `scripts/prepare-m
 
 The browser still owns admission policy, snapshots and output arbitration. The opt-in Node gateway owns provider credentials, authenticated request admission, persistent endpoint holds and cumulative cost exposure. It translates vendor SSE into a small request-scoped streaming protocol. The gateway quarantines capacity when upstream closure is ambiguous and preserves unknown usage in its ledger. User text can carry a bounded history of completed visible turns. Pixel evidence stays local.
 
-The gateway's static allowlist explicitly serves `perception.html` and only the MediaPipe module Wasm files, with `application/wasm` MIME. `index.html`/`runtime.html` keep the original CSP; `perception.html` alone adds `wasm-unsafe-eval`, `worker-src`, and `connect-src` for the pinned Google Storage model. No model weights or arbitrary static paths are served. The text gateway and perception detector are independent. The default gateway mode is the scripted/mock provider; a real paid call requires explicit operator configuration and smoke invocation.
+The gateway's static allowlist explicitly serves `perception.html` and only the versioned MediaPipe module files, with `.wasm` MIME and page-specific CSP. `index.html`/`runtime.html` keep the original CSP; `perception.html` alone adds `wasm-unsafe-eval`, `worker-src`, and `connect-src` for the pinned Google Storage model. No model weights or arbitrary static paths are served. The text gateway and perception detector are independent. The default gateway mode is the scripted/mock provider; a real paid call requires explicit operator configuration and smoke invocation.
 
 [Provider contract, recovery and deployment assessment](docs/real-streaming-provider.md)
