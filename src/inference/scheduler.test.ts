@@ -145,6 +145,87 @@ describe('duplex inference scheduler', () => {
     ]);
   });
 
+  it('books actual input and output and freezes new work after a reservation overrun', () => {
+    const { runtime, ingest, calls, call } = setup({ inputTokensPerTask: 25 });
+    const id = ingest();
+    call(id).callbacks.terminal({
+      status: 'completed', tokens: 16, usage: { inputTokens: 5, outputTokens: 11 },
+    });
+    expect(runtime.snapshot().budget).toMatchObject({
+      settledTokens: 16, settledInputTokens: 5, settledOutputTokens: 11, reservationOverrun: true, reservedTokens: 0,
+    });
+    const denied = ingest();
+    expect(calls.has(denied)).toBe(false);
+    expect(runtime.snapshot().records.at(-1)?.reason).toBe('Provider exceeded the token reservation');
+  });
+
+  it('quarantines a silent slot after logical stop and reconciles a late reliable receipt once', () => {
+    const { runtime, ingest, partial, clock, calls, complete } = setup({ slots: 1, terminalGraceMs: 25 });
+    const lost = ingest();
+    runtime.interrupt();
+    const queued = ingest();
+    clock.advance(25);
+    const denied = ingest();
+    expect(calls.size).toBe(1);
+    expect(runtime.snapshot().queued).toEqual([]);
+    expect(runtime.snapshot().records.filter(({ reason }) => reason === 'All endpoint slots quarantined')
+      .map(({ task }) => task?.id)).toEqual([queued, denied]);
+    expect(runtime.snapshot().budget).toMatchObject({ reservedTokens: 10, quarantinedSlots: 1 });
+    partial(lost);
+    expect(runtime.snapshot().outputs).toEqual([]);
+    complete(lost, null);
+    complete(lost, 999);
+    expect(runtime.snapshot().budget).toMatchObject({ reservedTokens: 0, provisionalTokens: 10, quarantinedSlots: 0 });
+    expect(calls.has(ingest())).toBe(true);
+  });
+
+  it('freezes bounded successful turns and excludes interrupted responses and prior sessions', () => {
+    const { runtime, ingest, partial, complete, call } = setup();
+    const response = { channel: 'response', supersede: true } as const;
+    const one = ingest(response);
+    partial(one, 0, 'First completed answer');
+    complete(one);
+    const interrupted = ingest(response);
+    partial(interrupted, 0, 'Interrupted answer');
+    const three = ingest(response);
+    expect(call(interrupted).signal.aborted).toBe(true);
+    expect(call(three).task.context.messages.map(({ content }) => content))
+      .toEqual(['Input', 'First completed answer', 'Input']);
+    expect(Object.isFrozen(call(three).task.context.messages[0])).toBe(true);
+    complete(interrupted);
+    partial(three, 0, 'Third answer');
+    complete(three);
+    for (let i = 0; i < 4; i += 1) {
+      const id = ingest(response);
+      partial(id, 0, String(i).repeat(1000));
+      complete(id);
+    }
+    const latest = ingest(response);
+    const snapshot = call(latest).task.context.messages;
+    expect(snapshot).toHaveLength(7);
+    expect(snapshot[1].content.length).toBe(700);
+    runtime.newSession();
+    complete(latest);
+    expect(call(ingest(response)).task.context.messages).toEqual([{ role: 'user', content: 'Input' }]);
+    expect(snapshot).toHaveLength(7);
+  });
+
+  it('retains request measurements when partials overwrite the event journal', () => {
+    const { runtime, ingest, partial, complete, clock } = setup();
+    const id = ingest();
+    clock.advance(10);
+    for (let idx = 0; idx < 200; idx += 1) partial(id, idx, 'a');
+    runtime.interrupt();
+    partial(id, 200, 'late');
+    clock.advance(30);
+    complete(id);
+    expect(runtime.snapshot().records.some(({ kind }) => kind === 'first-text')).toBe(false);
+    expect(runtime.requestMeasurements()[0]).toMatchObject({
+      firstTextDelayMs: 10, firstEffectiveDelayMs: 10, outputStopMs: 0, waitForTerminalAfterStopMs: 20,
+      blocked: 1, stale: 1, unanswered: false,
+    });
+  });
+
   it('keeps ambiguous start failure accounted until the adapter can attest termination', () => {
     const clock = new ReplayClock();
     let end: Callbacks['terminal'] | undefined;

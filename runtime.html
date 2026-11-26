@@ -14,9 +14,9 @@
     </header>
     <main>
       <header class="intro">
-        <p class="eyebrow">Local simulation</p>
+        <p class="eyebrow">Duplex inference</p>
         <h1>Live Vision Runtime Lab</h1>
-        <p>Ingest visual evidence during generation. Compare scheduling with one or two slots on a single scripted endpoint.</p>
+        <p>Ingest events during generation. Compare FIFO and SemanticStream on one endpoint.</p>
       </header>
       <div class="panel controls" aria-label="Runtime controls">
         <label>Scheduler
@@ -35,6 +35,14 @@
             <option value="error">Scripted error</option>
           </select>
         </label>
+        <form id="gateway-controls" aria-label="Model provider">
+          <label>Local gateway access token
+            <input id="gateway-token" type="password" autocomplete="off" minlength="32" maxlength="128" required />
+          </label>
+          <button id="enable-gateway">Enable real text model</button>
+          <button id="use-mock" type="button" hidden>Return to Mock</button>
+        </form>
+        <p id="provider-status" role="status">Mock provider · local simulation</p>
         <div class="actions">
           <button id="monitor">System monitor</button>
           <button id="procedural">Procedural scene</button>
@@ -63,7 +71,7 @@
       </div>
       <div class="details-grid">
         <section class="panel inset">
-          <h2>Mock LLM output</h2>
+          <h2 id="output-title">Mock LLM output</h2>
           <form id="turn">
             <input id="prompt" aria-label="User text" maxlength="500" placeholder="Ask about the current feed…" required />
             <button class="primary">Send</button>
@@ -93,6 +101,11 @@
           <canvas id="historical" width="96" height="54" role="img" aria-label="Retrieved historical thumbnail"></canvas>
         </section>
       </div>
+      <section class="panel inset">
+        <h2>Request measurements</h2>
+        <p id="metric-scope" class="note"></p>
+        <ul id="request-metrics" class="log"></ul>
+      </section>
     </main>
   </body>
 </html>

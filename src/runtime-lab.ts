@@ -4,6 +4,7 @@ import { SAMPLE_HEIGHT, SAMPLE_WIDTH } from './core/sample';
 import type { StreamFrame } from './core/stream';
 import { DecisionEngine } from './decision/engine';
 import { RuleBasedDecisionProvider } from './decision/rule-provider';
+import { GatewayStreamingProvider } from './inference/gateway-provider';
 import { InferenceScheduler } from './inference/scheduler';
 import type { TaskSummary } from './inference/scheduler';
 import { ScriptedStreamingProvider } from './inference/scripted-provider';
@@ -41,6 +42,9 @@ let pendingScenario: { label: string; critical: boolean } | undefined;
 let lastFilterAt = -Infinity;
 let latestDecision = 'Awaiting visual decision';
 let refresh: number | undefined;
+let gateway: GatewayStreamingProvider | undefined;
+let lastMonitorEvent: string | undefined;
+let gatewayConnectGeneration = 0;
 
 function showPixels(context: CanvasRenderingContext2D, pixels: Uint8ClampedArray, width: number, height: number): void {
   const image = context.createImageData(width, height);
@@ -72,10 +76,11 @@ const provider = new ScriptedStreamingProvider(systemClock, (task) => {
     fail: behavior.value === 'error',
   };
 });
-const runtime = new InferenceScheduler(provider, systemClock, {
+const mockRuntime = new InferenceScheduler(provider, systemClock, {
   slots: 2, queue: 4, tokensPerTask: 128, totalTokens: 12_800,
   transport: { windowMs: 5_000, maxFrames: 16, maxBytes: 1_300_000 },
 }, 'context-aware');
+let runtime = mockRuntime;
 
 function event(source: StreamEvent['source'], label: string, reason: string,
   request?: InferenceRequest, evidence?: Evidence, capturedAtMs = systemClock.now()): void {
@@ -91,16 +96,21 @@ function processFrame(frame: StreamFrame<VisualFrame>): void {
   const known = pendingScenario;
   if (decisions.adaptive === 'sent') {
     pendingScenario = undefined;
-    const evidence: Evidence = {
+    const evidence: Evidence | undefined = gateway ? undefined : {
       source: monitor ? 'monitor' : camera ? 'camera' : video ? 'video' : 'procedural',
       sequence, capturedAtMs: timestampMs, mediaType: 'application/x-rgba-base64',
       data: btoa(String.fromCharCode(...sample)),
     };
+    if (gateway) {
+      showPixels(agent, sample, SAMPLE_WIDTH, SAMPLE_HEIGHT);
+      element('agent-status').textContent = 'Local frame #' + sequence + ' · real model receives text only';
+    }
     const request: InferenceRequest = known?.critical
       ? { channel: 'observation', priority: 10, ttlMs: 4_000, supersede: true }
       : { channel: 'observation', priority: 1, ttlMs: 5_000, dedupeKey: known ? 'monitor-change' : 'pixel-candidate' };
     event(known ? 'scenario' : 'pixels', known?.label ?? 'Frame #' + sequence,
-      'Selected by ' + adaptiveSelection + ' · latest proposal: ' + latestDecision, request, evidence, timestampMs);
+      'Selected by ' + adaptiveSelection + ' · latest proposal: ' + latestDecision,
+      gateway ? undefined : request, evidence, timestampMs);
   } else if (timestampMs - lastFilterAt >= 500) {
     lastFilterAt = timestampMs;
     event('pixels', 'Frame #' + sequence, 'Visual filter: ' + decisions.adaptive + ' · latest proposal: ' + latestDecision,
@@ -112,15 +122,16 @@ function processFrame(frame: StreamFrame<VisualFrame>): void {
 function resetSampling(): void {
   session?.dispose();
   pendingScenario = undefined;
+  lastMonitorEvent = undefined;
   latestDecision = 'Awaiting visual decision';
   lastFilterAt = -Infinity;
   runtime.newSession(
     mode.value === 'serial' || mode.value === 'fifo' ? 'fifo' : 'context-aware',
-    mode.value === 'serial' || mode.value === 'aware-serial' ? 1 : 2,
+    mode.value === 'serial' || mode.value === 'aware-serial' ? 1 : (gateway?.capabilities.slots ?? 2),
   );
   agent.clearRect(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
   historical.clearRect(0, 0, SAMPLE_WIDTH, SAMPLE_HEIGHT);
-  element('agent-status').textContent = 'Awaiting dispatch';
+  element('agent-status').textContent = gateway ? 'Real provider receives text only' : 'Awaiting dispatch';
   element('history-status').textContent = '';
   element<HTMLInputElement>('sequence').value = '';
   session = new SamplingSession(
@@ -203,7 +214,15 @@ function trigger(critical: boolean): void {
   if (pendingScenario) event('scenario', pendingScenario.label, 'Scene changed again before visual selection');
   monitor.trigger(critical);
   pendingScenario = { label, critical };
-  event('scenario', label, 'Known monitor event · awaiting selected evidence');
+  lastMonitorEvent = label;
+  if (gateway) {
+    event('scenario', label, 'Known synthetic event metadata · user-triggered model request', {
+      channel: 'observation', priority: critical ? 10 : 1, ttlMs: gateway.capabilities.timeoutMs,
+      supersede: critical, dedupeKey: critical ? undefined : 'monitor-change',
+    });
+  } else {
+    event('scenario', label, 'Known monitor event · awaiting selected evidence');
+  }
 }
 
 function list(id: string, lines: readonly string[]): void {
@@ -220,13 +239,13 @@ function taskLabel(task: TaskSummary): string {
 }
 
 function render(): void {
-  const { slots, attempts, queued, records, outputs, budget, peakSlots, peakQueue } = runtime.snapshot();
+  const { slots, attempts, queued, records, outputs, budget, peakSlots, peakQueue, sessionVersion } = runtime.snapshot();
   const visibleSlots = Math.max(slots, ...attempts.map((attempt) => attempt.slot ?? 0));
   const capacity = Array.from({ length: visibleSlots }, (_, index) => {
     const item = document.createElement('span');
     const slot = index + 1;
     const attempt = attempts.find((candidate) => candidate.slot === slot);
-    const state = attempt ? '#' + attempt.id + (attempt.outcome ? ' draining' : ' running')
+    const state = attempt ? '#' + attempt.id + (attempt.quarantined ? ' quarantined' : attempt.outcome ? ' draining' : ' running')
       : slot > slots ? 'disabled' : 'free';
     item.textContent = 'Slot ' + slot + ' · ' + state;
     return item;
@@ -255,12 +274,33 @@ function render(): void {
   list('budget', [
     'Rolling dispatch · ' + budget.rolling.frames + '/' + budget.rollingLimits.maxFrames + ' requests · '
       + budget.rolling.bytes.toLocaleString() + '/' + budget.rollingLimits.maxBytes.toLocaleString() + ' bytes / 5 s',
-    'Simulated tokens · ' + budget.settledTokens + ' settled + ' + budget.reservedTokens
-      + ' reserved + ' + budget.provisionalTokens + ' provisional / ' + budget.tokenLimit,
+    (gateway ? 'Client token exposure' : 'Simulated tokens') + ' · ' + budget.settledTokens + ' settled + ' + budget.reservedTokens
+      + ' held + ' + budget.provisionalTokens + ' provisional / ' + budget.tokenLimit
+      + (budget.reservationOverrun ? ' · admissions frozen after overrun' : ''),
+    ...(gateway ? ['Reported tokens · ' + budget.settledInputTokens + ' input / ' + budget.settledOutputTokens
+      + ' output · ' + budget.unknownUsageCount + ' terminal receipts without usage · '
+      + budget.quarantinedSlots + ' quarantined slot(s)'] : []),
     ...(visual ? ['Visual transfer · ' + visual.retrieval.budget.total.usedFrames + '/'
       + visual.retrieval.budget.total.maxFrames + ' frames · ' + visual.retrieval.budget.total.usedBytes.toLocaleString()
       + '/' + visual.retrieval.budget.total.maxBytes.toLocaleString() + ' bytes / 5 s (sampling + retrieval)'] : []),
   ]);
+  const metrics = runtime.requestMeasurements(sessionVersion);
+  element('metric-scope').textContent = (gateway
+    ? 'Gateway timings · first streamed text is the observable first-token proxy'
+    : 'Scripted simulation · timings from the browser clock') + ' · '
+    + metrics.filter((task) => task.unanswered).length + '/' + metrics.length + ' recent tasks ended without effective output';
+  const ms = (value?: number) => value === undefined ? '—' : Math.max(0, Math.round(value)) + ' ms';
+  list('request-metrics', metrics.slice(-12).reverse().map((task) => '#' + task.id + ' · ' + task.outcome
+    + (task.requestId ? ' · request ' + task.requestId : '')
+    + (task.providerRequestId ? ' · upstream ' + task.providerRequestId : '')
+    + ' · start +' + (task.startedAtMs === undefined ? '—' : ms(task.startedAtMs - birth))
+    + ' · gateway dispatch +' + (task.gatewayDispatchAtMs === undefined ? '—' : ms(task.gatewayDispatchAtMs - birth))
+    + ' · first text ' + ms(task.firstTextDelayMs) + ' / upstream ' + ms(task.upstreamFirstTextMs)
+    + ' · event → effective ' + ms(task.firstEffectiveDelayMs)
+    + ' · output stop ' + ms(task.outputStopMs) + ' · stop → terminal ' + ms(task.waitForTerminalAfterStopMs)
+    + ' · upstream ' + ms(task.upstreamElapsedMs)
+    + ' · tokens ' + (task.usage === 'reported' ? task.inputTokens + ' in / ' + task.outputTokens + ' out' : task.usage)
+    + ' · ' + task.stale + ' stale blocked / ' + task.blocked + ' total blocked' + (task.unanswered ? ' · unanswered' : '')));
   const buffer = visual?.buffer;
   element('cache').textContent = buffer
     ? buffer.frameCount + ' retained frames · ' + Math.round(buffer.byteCount / 1024) + ' KiB · latest #'
@@ -309,7 +349,8 @@ element<HTMLFormElement>('turn').onsubmit = (e) => {
   const text = input.value.trim();
   if (!text) return;
   event('user', text, 'User turn · supersede previous response', {
-    channel: 'response', priority: 20, ttlMs: 5_000, supersede: true,
+    channel: 'response', priority: 20, ttlMs: gateway?.capabilities.timeoutMs ?? 5_000, supersede: true,
+    textContext: gateway && lastMonitorEvent ? 'Most recent local synthetic monitor event: ' + lastMonitorEvent : undefined,
   });
   input.value = '';
 };
@@ -327,7 +368,70 @@ element<HTMLFormElement>('history').onsubmit = (e) => {
   element('history-status').textContent = 'Frame #' + sequence + ' · ' + result.status + ' · ' + result.message;
 };
 
+function updateSlotOptions(slots: number): void {
+  for (const option of mode.options) {
+    if (option.value === 'fifo' || option.value === 'aware') option.disabled = slots < 2;
+  }
+  if (slots === 1 && (mode.value === 'fifo' || mode.value === 'aware')) {
+    mode.value = mode.value === 'fifo' ? 'serial' : 'aware-serial';
+  }
+}
+
+function useMock(): void {
+  gatewayConnectGeneration += 1;
+  runtime.newSession();
+  gateway = undefined;
+  runtime = mockRuntime;
+  updateSlotOptions(2);
+  element('provider-status').textContent = 'Mock provider · local simulation';
+  element('output-title').textContent = 'Mock LLM output';
+  behavior.disabled = false;
+  element('use-mock').hidden = true;
+  element<HTMLInputElement>('gateway-token').disabled = false;
+  element<HTMLButtonElement>('enable-gateway').disabled = false;
+  resetSampling();
+}
+
+element('use-mock').onclick = useMock;
+element<HTMLFormElement>('gateway-controls').onsubmit = async (e) => {
+  e.preventDefault();
+  if (gateway) return;
+  const field = element<HTMLInputElement>('gateway-token');
+  const enable = element<HTMLButtonElement>('enable-gateway');
+  const token = field.value.trim();
+  if (!token) return;
+  field.value = '';
+  enable.disabled = true;
+  const generation = ++gatewayConnectGeneration;
+  try {
+    const adapter = await GatewayStreamingProvider.connect(token);
+    if (generation !== gatewayConnectGeneration) return;
+    gateway = adapter;
+    const caps = adapter.capabilities;
+    updateSlotOptions(caps.slots);
+    runtime.newSession();
+    runtime = new InferenceScheduler(adapter, systemClock, {
+      slots: caps.slots, queue: 4,
+      tokensPerTask: caps.outputLimit, inputTokensPerTask: caps.inputReserve,
+      totalTokens: (caps.inputReserve + caps.outputLimit) * 100,
+      transport: { windowMs: 5_000, maxFrames: 16, maxBytes: 384_000 },
+    }, 'context-aware');
+    element('provider-status').textContent = 'Real gateway · ' + caps.model
+      + ' · submitted text and triggered monitor events can incur charges';
+    element('output-title').textContent = 'Streaming model output · ' + caps.model;
+    element('use-mock').hidden = false;
+    field.disabled = true;
+    behavior.disabled = true;
+    resetSampling();
+  } catch {
+    if (generation !== gatewayConnectGeneration) return;
+    enable.disabled = false;
+    element('provider-status').textContent = 'Could not enable the real gateway. Check the local server and access token.';
+  }
+};
+
 window.addEventListener('pagehide', () => {
+  gatewayConnectGeneration += 1;
   window.clearInterval(refresh);
   stopSource();
   session?.dispose();
@@ -336,6 +440,7 @@ window.addEventListener('pagehide', () => {
 });
 window.addEventListener('pageshow', (e) => {
   if (!e.persisted) return;
+  if (!gateway) element<HTMLButtonElement>('enable-gateway').disabled = false;
   useScene();
   refresh = window.setInterval(render, 200);
 });

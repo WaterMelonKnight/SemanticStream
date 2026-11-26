@@ -242,3 +242,9 @@ Phase 3A does not deploy a model, download weights, call a paid API, or run on a
 The independent Live Vision Runtime Lab connects Phase 3R's admitted evidence to a DOM-free inference scheduler. The browser retains source ownership. Overlapping requests use one scripted endpoint, immutable snapshots, one writer per output channel, and terminal-evidence-based release of physical capacity. Each visual source reset invalidates the inference session while preserving slots still in flight. The original visual comparison and its historical benchmarks remain available.
 
 See [Phase 4A runtime architecture](docs/phase4a-duplex-runtime.md) for task, output, usage and browser-source contracts.
+
+## Phase 4A+1 · Streaming text integration
+
+The browser still owns admission policy, snapshots and output arbitration. The opt-in Node gateway owns provider credentials, authenticated request admission, persistent endpoint holds and cumulative cost exposure. It translates vendor SSE into a small request-scoped streaming protocol. The gateway quarantines capacity when upstream closure is ambiguous and preserves unknown usage in its ledger. User text can carry a bounded history of completed visible turns. Pixel evidence stays local.
+
+[Provider contract, recovery and deployment assessment](docs/real-streaming-provider.md)

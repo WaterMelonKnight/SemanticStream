@@ -2,9 +2,11 @@ import { RollingResourceBudget } from '../core/resource-budget';
 import type { ResourceBudgetLimits } from '../core/resource-budget';
 import { BoundedTimeline } from '../core/timeline';
 import { OutputCoordinator } from './output';
+import { RuntimeMeasurements } from './runtime-metrics';
+import { validTokenCount } from './types';
 import type {
-  ContextSnapshot, Evidence, InferenceProvider, InferenceRequest, InferenceTask, OutputChannel,
-  PartialOutput, ProviderTerminal, RuntimeClock, SchedulingPolicy, StreamEvent,
+  ChatMessage, ContextSnapshot, Evidence, InferenceProvider, InferenceRequest, InferenceTask, OutputChannel,
+  PartialOutput, ProviderTerminal, RuntimeClock, SchedulingPolicy, StreamEvent, TokenUsage,
 } from './types';
 
 type Outcome = 'completed' | 'failed' | 'cancelled' | 'expired' | 'invalidated' | 'rejected';
@@ -16,6 +18,13 @@ interface ActiveTask {
   slot?: number;
   startedAtMs?: number;
   firstOutputAtMs?: number;
+  firstTextAtMs?: number;
+  requestId?: string;
+  providerRequestId?: string;
+  upstreamDispatched?: boolean;
+  stopRequestedAtMs?: number;
+  stoppedAtMs?: number;
+  quarantined?: boolean;
   outcome?: Outcome;
 }
 
@@ -23,11 +32,13 @@ interface Attempt {
   readonly work: ActiveTask;
   readonly controller: AbortController;
   nextIndex: number;
+  stopWatchdog?: () => void;
 }
 
 export interface TaskSummary {
   readonly id: number;
   readonly eventId: number;
+  readonly ingestedAtMs: number;
   readonly channel: OutputChannel;
   readonly session: number;
   readonly interaction: number;
@@ -37,15 +48,26 @@ export interface TaskSummary {
   readonly slot?: number;
   readonly startedAtMs?: number;
   readonly firstOutputAtMs?: number;
+  readonly firstTextAtMs?: number;
+  readonly requestId?: string;
+  readonly providerRequestId?: string;
+  readonly stopRequestedAtMs?: number;
+  readonly stoppedAtMs?: number;
+  readonly quarantined?: boolean;
 }
 
 export interface RuntimeRecord {
   readonly atMs: number;
-  readonly kind: 'input' | 'queued' | 'start' | 'output' | 'blocked' | 'end' | 'upstream';
+  readonly kind: 'input' | 'queued' | 'start' | 'output' | 'blocked' | 'end' | 'upstream' | 'request' | 'dispatch' | 'first-text' | 'quarantined';
   readonly reason: string;
   readonly event?: StreamEvent;
   readonly task?: TaskSummary;
   readonly outcome?: Outcome;
+  readonly upstreamMs?: number;
+  readonly staleOutput?: boolean;
+  readonly usage?: TokenUsage;
+  readonly usageUnknown?: boolean;
+  readonly providerRequestId?: string;
 }
 
 export interface RuntimeLimits {
@@ -54,6 +76,8 @@ export interface RuntimeLimits {
   readonly transport: ResourceBudgetLimits;
   readonly totalTokens: number;
   readonly tokensPerTask: number;
+  readonly inputTokensPerTask?: number;
+  readonly terminalGraceMs?: number;
 }
 
 const MAX_EVIDENCE_BYTES = 32_768;
@@ -62,18 +86,22 @@ const MAX_EVIDENCE_AGE_MS = 3_000;
 const MAX_TIMER_MS = 2_147_483_647;
 const encoder = new TextEncoder();
 
-function view({ task, slot, startedAtMs, firstOutputAtMs }: ActiveTask): TaskSummary {
+function view({
+  task, slot, startedAtMs, firstOutputAtMs, firstTextAtMs, requestId, providerRequestId, stopRequestedAtMs, stoppedAtMs, quarantined,
+}: ActiveTask): TaskSummary {
   return {
-    id: task.id, eventId: task.event.id, channel: task.channel,
+    id: task.id, eventId: task.event.id, ingestedAtMs: task.event.ingestedAtMs, channel: task.channel,
     session: task.sessionVersion, interaction: task.interactionVersion, context: task.contextVersion,
     evidence: task.context.evidence.map(({ sequence }) => sequence),
     deadlineMs: task.deadlineMs, slot, startedAtMs, firstOutputAtMs,
+    firstTextAtMs, requestId, providerRequestId, stopRequestedAtMs, stoppedAtMs, quarantined,
   };
 }
 
 /** One scheduler owns the endpoint slots across session/interaction changes. */
 export class InferenceScheduler {
   private readonly journal: BoundedTimeline<RuntimeRecord>;
+  private readonly measurements = new RuntimeMeasurements();
   private readonly output = new OutputCoordinator();
   private readonly transport: RollingResourceBudget;
   private readonly queue: ActiveTask[] = [];
@@ -90,6 +118,11 @@ export class InferenceScheduler {
   private reservedTokens = 0;
   private settledTokens = 0;
   private provisionalTokens = 0;
+  private settledInputTokens = 0;
+  private settledOutputTokens = 0;
+  private unknownUsageCount = 0;
+  private reservationOverrun = false;
+  private conversation: readonly ChatMessage[] = [];
   private sentBytes = 0;
   private peakQueue = 0;
   private peakSlots = 0;
@@ -106,6 +139,9 @@ export class InferenceScheduler {
     for (const value of [limits.slots, limits.queue, limits.totalTokens, limits.tokensPerTask]) {
       if (!Number.isSafeInteger(value) || value < 1) throw new RangeError('Runtime caps must be positive integers');
     }
+    if (!validTokenCount(limits.inputTokensPerTask ?? 0) || !validTokenCount(limits.tokensPerTask)
+      || !Number.isInteger(limits.terminalGraceMs ?? 45_000) || (limits.terminalGraceMs ?? 45_000) < 1
+      || (limits.terminalGraceMs ?? 45_000) > MAX_TIMER_MS) throw new RangeError('Invalid inference reservation or grace period');
     this.limits = { ...limits };
     this.slots = limits.slots;
     this.policy = policy;
@@ -142,22 +178,35 @@ export class InferenceScheduler {
       }
     }
     if (!request) return;
+    const label = event.source === 'scenario' ? 'Synthetic monitor event: ' + event.label : event.label;
+    const current: ChatMessage = Object.freeze({
+      role: 'user', content: request.textContext ? request.textContext.slice(0, 300) + '\n\n' + label : label,
+    });
+    const history = request.channel === 'response' && event.source === 'user' ? this.conversation : [];
+    const messages = Object.freeze([...history, current]);
     const context: ContextSnapshot = Object.freeze({
       version: ++this.contextVersion,
       evidence: Object.freeze(this.evidence.map(({ item }) => item)),
-      encodedBytes: this.evidence.reduce((total, { bytes }) => total + bytes, encoder.encode(event.label).byteLength),
+      messages,
+      encodedBytes: messages.reduce((total, message) => total + encoder.encode(message.content).byteLength, 0)
+        + this.evidence.reduce((total, { bytes }) => total + bytes, 0),
     });
     const { channel, priority, dependsOn, supersede, ttlMs } = request;
     const task: InferenceTask = Object.freeze({
       id: ++this.taskId, event, channel, priority, dependsOn, dedupeKey: request.dedupeKey?.slice(0, 80),
       sessionVersion: this.session, interactionVersion: this.interaction,
       context, contextVersion: context.version, deadlineMs: now + ttlMs, tokenLimit: this.limits.tokensPerTask,
+      tokenReservation: this.limits.tokensPerTask + (this.limits.inputTokensPerTask ?? 0),
     });
 
     this.batch(() => {
       if (supersede) this.retire('Channel superseded', channel);
       const active = this.active();
       const reject = (reason: string) => this.record('end', reason, { task, clearDeadline() {} }, undefined, 'rejected');
+      if (this.quarantinedSlots() >= this.slots) {
+        reject('All endpoint slots quarantined');
+        return;
+      }
       if (dependsOn !== undefined && !active.some((work) => work.task.id === dependsOn)) {
         reject('Dependency unavailable');
         return;
@@ -211,12 +260,14 @@ export class InferenceScheduler {
       this.policy = policy;
       this.slots = slots;
       this.evidence = [];
+      this.conversation = [];
       this.retire('Session changed');
     });
   }
 
   snapshot() {
     return {
+      sessionVersion: this.session,
       records: this.journal.toArray(),
       outputs: this.output.snapshot(),
       queued: this.queue.map(view),
@@ -232,35 +283,75 @@ export class InferenceScheduler {
         settledTokens: this.settledTokens,
         reservedTokens: this.reservedTokens,
         provisionalTokens: this.provisionalTokens,
+        settledInputTokens: this.settledInputTokens,
+        settledOutputTokens: this.settledOutputTokens,
+        unknownUsageCount: this.unknownUsageCount,
+        reservationOverrun: this.reservationOverrun,
+        quarantinedSlots: this.quarantinedSlots(),
       },
     };
+  }
+
+  requestMeasurements(session?: number) {
+    return this.measurements.snapshot(session);
   }
 
   private active(): ActiveTask[] {
     return [...this.queue, ...[...this.attempts.values()].map(({ work }) => work)].filter((work) => !work.outcome);
   }
 
-  private retire(reason: string, channel?: OutputChannel, outcome: Outcome = 'invalidated'): void {
-    this.output.retire(channel);
-    for (const work of this.active()) {
-      if (channel === undefined || work.task.channel === channel) this.finish(work, outcome, reason);
+  private quarantinedSlots(): number {
+    return [...this.attempts.values()].filter(({ work }) => work.quarantined).length;
+  }
+
+  private quarantine(attempt: Attempt, reason: string): void {
+    const { work } = attempt;
+    if (this.attempts.get(work.task.id) !== attempt || work.quarantined) return;
+    work.quarantined = true;
+    attempt.stopWatchdog?.();
+    this.record('quarantined', reason, work);
+    this.finish(work, 'failed', reason);
+    if (this.quarantinedSlots() >= this.slots) {
+      for (const pending of [...this.queue]) this.finish(pending, 'rejected', 'All endpoint slots quarantined');
     }
   }
 
-  private finish(work: ActiveTask, outcome: Outcome, reason: string): void {
+  private retire(reason: string, channel?: OutputChannel, outcome: Outcome = 'invalidated'): void {
+    const requestedAt = this.clock.now();
+    this.output.retire(channel);
+    for (const work of this.active()) {
+      if (channel === undefined || work.task.channel === channel) this.finish(work, outcome, reason, requestedAt);
+    }
+  }
+
+  private finish(work: ActiveTask, outcome: Outcome, reason: string, requestedAt = this.clock.now()): void {
     if (work.outcome) return;
     work.outcome = outcome;
     work.clearDeadline();
     const index = this.queue.indexOf(work);
     if (index >= 0) this.queue.splice(index, 1);
-    this.output.finish(work.task, outcome === 'completed');
+    const attempt = this.attempts.get(work.task.id);
+    if (attempt) work.stopRequestedAtMs = requestedAt;
+    const text = this.output.finish(work.task, outcome === 'completed');
+    if (attempt) work.stoppedAtMs = this.clock.now();
+    if (text && work.task.channel === 'response' && work.task.event.source === 'user') {
+      this.conversation = [
+        ...this.conversation.slice(-4),
+        Object.freeze({ role: 'user', content: work.task.event.label }),
+        Object.freeze({ role: 'assistant', content: text.slice(0, 700) }),
+      ];
+    }
     this.record('end', reason, work, undefined, outcome);
     for (const dependent of [...this.queue]) {
       if (dependent.waitingFor !== work.task.id) continue;
       if (outcome === 'completed') dependent.waitingFor = undefined;
       else this.finish(dependent, 'invalidated', 'Dependency did not complete');
     }
-    this.attempts.get(work.task.id)?.controller.abort();
+    if (attempt && !work.quarantined) {
+      attempt.stopWatchdog = this.clock.after(this.limits.terminalGraceMs ?? 45_000, () =>
+        this.batch(() => this.quarantine(attempt, 'Reliable upstream terminal not received')));
+    }
+    attempt?.controller.abort();
   }
 
   private compare(a: ActiveTask, b: ActiveTask): number {
@@ -302,8 +393,9 @@ export class InferenceScheduler {
       return;
     }
     const exposure = this.reservedTokens + this.settledTokens + this.provisionalTokens;
-    if (task.tokenLimit > this.limits.totalTokens - exposure) {
-      this.finish(work, 'rejected', 'Cumulative token budget exhausted');
+    if (this.reservationOverrun || task.tokenReservation > this.limits.totalTokens - exposure) {
+      this.finish(work, 'rejected', this.reservationOverrun ? 'Provider exceeded the token reservation'
+        : 'Cumulative token budget exhausted');
       return;
     }
     const transfer = this.transport.reserve(now, 1, task.context.encodedBytes);
@@ -320,7 +412,7 @@ export class InferenceScheduler {
     const attempt: Attempt = { work, controller: new AbortController(), nextIndex: 0 };
     this.attempts.set(task.id, attempt);
     this.peakSlots = Math.max(this.peakSlots, this.attempts.size);
-    this.reservedTokens += task.tokenLimit;
+    this.reservedTokens += task.tokenReservation;
     // Charge the local dispatch once. A provider can report zero usage without refunding transport.
     transfer.commit(now);
     this.sentBytes += task.context.encodedBytes;
@@ -329,9 +421,21 @@ export class InferenceScheduler {
       this.provider.start(task, attempt.controller.signal, {
         partial: (chunk) => this.partial(attempt, chunk),
         terminal: (receipt) => this.batch(() => this.terminal(attempt, receipt)),
+        requested: (requestId) => {
+          if (this.attempts.get(task.id) !== attempt || work.requestId !== undefined) return;
+          work.requestId = requestId.slice(0, 128);
+          this.record('request', 'Started gateway request', work);
+        },
+        dispatched: (requestId) => {
+          if (this.attempts.get(task.id) !== attempt || work.upstreamDispatched) return;
+          work.requestId ??= requestId.slice(0, 128);
+          work.upstreamDispatched = true;
+          this.record('dispatch', 'Gateway reports upstream dispatch', work);
+        },
+        unconfirmed: (reason) => this.batch(() => this.quarantine(attempt, reason.slice(0, 200))),
       });
     } catch {
-      this.finish(work, 'failed', 'Dispatch threw without reliable terminal evidence');
+      this.quarantine(attempt, 'Dispatch threw without reliable terminal evidence');
     }
   }
 
@@ -339,14 +443,22 @@ export class InferenceScheduler {
     const { work } = attempt;
     const { task } = work;
     const now = this.clock.now();
-    const active = this.attempts.get(task.id) === attempt && !work.outcome;
-    const accepted = this.output.partial(task, chunk, attempt.nextIndex, active, this.session, this.interaction, now);
+    const current = this.attempts.get(task.id) === attempt;
+    if (current && work.firstTextAtMs === undefined && chunk.index === attempt.nextIndex && chunk.text) {
+      work.firstTextAtMs = now;
+      work.providerRequestId = chunk.providerRequestId?.slice(0, 128);
+      this.record('first-text', 'First text received', work, undefined, undefined, { upstreamMs: chunk.upstreamFirstTextMs });
+    }
+    const active = current && !work.outcome;
+    const decision = this.output.partial(task, chunk, attempt.nextIndex, active, this.session, this.interaction, now);
     if (chunk.index === attempt.nextIndex) attempt.nextIndex += 1;
-    if (accepted) {
+    if (decision === 'authorized') {
       work.firstOutputAtMs ??= now;
       this.record('output', 'Authorized partial', work);
     } else {
-      this.record('blocked', active ? 'Writer, deadline or chunk check' : 'Task no longer eligible', work);
+      const reason = decision === 'stale' ? 'Stale task, writer or deadline'
+        : decision === 'full' ? 'Visible output cap reached' : 'Invalid or out-of-order partial';
+      this.record('blocked', reason, work, undefined, undefined, { staleOutput: decision === 'stale' });
     }
   }
 
@@ -357,19 +469,39 @@ export class InferenceScheduler {
     if (receipt.status !== 'completed' && receipt.status !== 'failed' && receipt.status !== 'cancelled') return;
 
     this.attempts.delete(task.id);
-    this.reservedTokens -= task.tokenLimit;
+    attempt.stopWatchdog?.();
+    this.reservedTokens -= task.tokenReservation;
     const { tokens } = receipt;
-    const known = tokens !== null && Number.isSafeInteger(tokens) && tokens >= 0;
-    if (known) this.settledTokens += tokens;
-    else this.provisionalTokens += task.tokenLimit;
-    this.record('upstream', receipt.status + (known ? ' · ' + tokens + ' tokens' : ' · usage unknown'), work);
+    const known = validTokenCount(tokens);
+    const usage = receipt.usage && validTokenCount(receipt.usage.inputTokens)
+      && validTokenCount(receipt.usage.outputTokens)
+      && receipt.usage.inputTokens + receipt.usage.outputTokens === tokens ? receipt.usage : undefined;
+    if (known) {
+      this.settledTokens += tokens;
+      this.settledInputTokens += usage?.inputTokens ?? 0;
+      this.settledOutputTokens += usage?.outputTokens ?? 0;
+      if (tokens > task.tokenReservation || (usage && (usage.outputTokens > task.tokenLimit
+        || (this.limits.inputTokensPerTask !== undefined && usage.inputTokens > this.limits.inputTokensPerTask)))) {
+        this.reservationOverrun = true;
+      }
+    } else {
+      this.provisionalTokens += task.tokenReservation;
+      this.unknownUsageCount += 1;
+    }
+    this.record('upstream', receipt.status + (known ? ' · ' + tokens + ' tokens' : ' · usage unknown'), work,
+      undefined, undefined, {
+        usage, usageUnknown: !known, upstreamMs: receipt.upstreamElapsedMs, providerRequestId: receipt.providerRequestId,
+      });
     if (this.clock.now() >= task.deadlineMs) this.finish(work, 'expired', 'Terminal arrived at or after deadline');
     else this.finish(work, receipt.status, receipt.reason?.slice(0, 200) ?? 'Upstream ' + receipt.status);
   }
 
   private record(
     kind: RuntimeRecord['kind'], reason: string, work?: ActiveTask, event?: StreamEvent, outcome?: Outcome,
+    details?: Pick<RuntimeRecord, 'upstreamMs' | 'usage' | 'usageUnknown' | 'providerRequestId' | 'staleOutput'>,
   ): void {
-    this.journal.push({ atMs: this.clock.now(), kind, reason, task: work && view(work), event, outcome });
+    const row = { ...details, atMs: this.clock.now(), kind, reason, task: work && view(work), event, outcome };
+    this.journal.push(row);
+    this.measurements.record(row);
   }
 }

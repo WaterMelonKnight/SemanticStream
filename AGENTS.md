@@ -15,6 +15,7 @@ SemanticStream is adaptive context streaming infrastructure for real-time AI age
 - `src/benchmark/` owns deterministic fixtures, replay, evaluation, and JSON/CSV/Markdown reports. Keep it free of DOM and browser APIs. Phase 2 replay is in `retrieval-runner.ts` and `retrieval-report.ts`.
 - `src/visual/video-source.ts` owns the video element, Object URL, frame callbacks, seek/load reset, and deduplication. `src/visual/source.ts` owns the procedural adapter.
 - Find Canvas capture, thumbnail preparation, and the mock sink in `src/visual/`. The browser entry point is `src/main.ts`; the timeline renderer is `src/ui/timeline-view.ts`.
+- `src/inference/` owns streaming task lifecycle, output eligibility, snapshots and the browser gateway adapter. `src/gateway/` owns authenticated Node request admission, vendor SSE profiles and the persistent cost ledger.
 - Keep core, policy, timeline, rate, and benchmark tests runnable in Node.js. Keep Canvas, video, DOM, and animation scheduling in the browser layer.
 
 ## Working agreements
@@ -34,10 +35,11 @@ SemanticStream is adaptive context streaming infrastructure for real-time AI age
 - Task ROI is a user/task declaration, never generated from evaluator event labels. Keep per-frame feature extraction synchronous and cheap; keep model/decision calls at the low-frequency decision interval. Do not call a remote model on every frame. Fallback must be deterministic.
 - The live task decision is an advisory preview unless the adaptive strategy is `task` (Task-aware live gate); then it gates the adaptive sampler's send. Provider retrieval proposals execute only in replay. Manual browser retrieval goes through the same reservation gate. Do not make the preview silently mutate budgets or bypass admission.
 - The cue-retrieval experiment may use real system signals such as budget denial, but never event labels. The label-timed oracle is an upper bound only; label it as non-autonomous everywhere.
-- Do not cache whole videos or unbounded 30 fps RGBA history. Do not implement model downloads, model APIs, GPU work, a backend, or a paid service in this phase. The HTTP provider contract is design-only.
+- Keep media local and bounded. The opt-in text gateway is the only path to a real model in Phase 4A+1. Never run paid smoke tests automatically. Use local SSE fixtures in tests and CI. Keep credentials outside the static build, logs and repository.
+- Preserve a gateway hold until a trustworthy terminal arrives or an operator reconciles authoritative evidence. EOF, HTTP abort and logical task cancellation alone cannot free it.
 - Describe frame counts as frame counts. Document event misses and the exact timing boundaries of latency, timeline capacity, and rate windows.
 - Keep visual data local by default. Build a static site with no credentials, uploads, or service dependencies.
 
 See [runtime architecture v2](docs/runtime-architecture-v2.md) for time, lifecycle and action semantics.
 
-Run `npm ci`, `npm run typecheck`, `npm run test`, `npm run benchmark` (Phase 1B + 2 + 3A), and `npm run build` before submitting. Use `npm run preview` to verify the built page when browser automation is available. Report the checks that ran and any gaps. Submit changes on a separate branch without merging unless requested.
+Run `npm ci`, `npm run typecheck`, `npm run test`, `npm run benchmark` (Phase 1B, 2, 3A and 4A), and `npm run build` before submitting. Use `npm run preview` to verify the built page when browser automation is available. Report the checks that ran and any gaps. Submit changes on a separate branch without merging unless requested.
