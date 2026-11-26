@@ -317,7 +317,9 @@ legend, .slider label { padding: 0; color: var(--subtle); font-size: 12px; font-
 
 @media (max-width: 680px) {
   .container { width: calc(100% - 32px); }
-  .topbar-inner { min-height: 55px; }
+  .topbar-inner { min-height: 55px; flex-wrap: wrap; padding-block: 8px; }
+  .topbar-inner > a { order: 3; font-size: 12px; }
+  .topbar-inner .local-status { order: 2; margin-left: auto; }
   main { padding-top: 28px; }
   .intro { margin-bottom: 20px; }
   .views, .dashboard { grid-template-columns: minmax(0, 1fr); gap: 12px; }

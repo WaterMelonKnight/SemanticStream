@@ -1,6 +1,6 @@
 # Phase 4A+1 · Streaming text provider
 
-The static site defaults to the scripted provider. The opt-in Node gateway serves the built Lab on loopback and forwards only text. Enabling real mode checks gateway availability. A text submission or a synthetic monitor button triggers a model request. Camera, video, routine pixel changes, page load and the deterministic benchmark make zero upstream requests. The local evidence preview and retrieval remain available.
+The static site defaults to the scripted provider. The opt-in Node gateway serves the built Lab on loopback, including the independently built perception page, and forwards only text. Enabling real mode checks gateway availability. A text submission or a synthetic monitor button triggers a model request. Camera, video, routine pixel changes, page load and the deterministic benchmark make zero upstream requests. The perception page may download its own detector only after explicit enable. The local evidence preview, retrieval, and optional local detector remain available.
 
 ## Provider profiles
 
@@ -48,7 +48,16 @@ Build with `npm run build`. Export the settings below through your local secret 
 | `SS_INPUT_NANO_USD_PER_TOKEN`, `SS_OUTPUT_NANO_USD_PER_TOKEN` | Positive price ceilings. Multiply USD per million tokens by 1,000 and round up |
 | `SS_PORT`, `SS_UPSTREAM_TIMEOUT_MS`, `SS_CANCEL_GRACE_MS` | Optional. Default to 4180, 40,000 ms and 1,500 ms |
 
-Run `npm run gateway` and open `http://127.0.0.1:4180/runtime.html`. The server checks the loopback Host and same-origin browser Origin, requires a bearer token for API endpoints, serves static assets from `dist` and uses no cross-origin access. Keep secrets out of client environment prefixes, source, logs and build outputs. The comparison and smoke clients send no data until explicitly launched. [DeepSeek models and pricing](https://api-docs.deepseek.com/quick_start/pricing/)
+Run `npm run gateway` and open `http://127.0.0.1:4180/runtime.html`. The server checks the loopback Host and same-origin browser Origin, requires a bearer token for API endpoints, and serves an explicit static allowlist from `dist`: `index.html`, `runtime.html`, `perception.html`, Vite assets, benchmark JSON, and exactly the MediaPipe module Wasm files. The API path remains same-origin. Keep secrets out of client environment prefixes, source, logs and build outputs.
+
+### Static pages, CSP and the perception experiment
+
+- `.wasm` is served as `application/wasm`; model weights are **not** in `dist` and are not served by the gateway.
+- `index.html` and `runtime.html` keep the original CSP (`default-src 'self'`; no `wasm-unsafe-eval`, no external connect).
+- `perception.html` gets a page-specific CSP that additionally permits `script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self' blob:`, and `connect-src 'self' https://storage.googleapis.com` for the optional EfficientDet-Lite0 download. No other cross-origin connect is allowlisted.
+- The perception model is fetched only after the user clicks **Enable model**. Media upload remains absent; the gateway's text API is the only path to a real text model.
+- The static build also emits `public/_headers` for Cloudflare Pages with `application/wasm` for the module Wasm and the same `/perception.html` CSP. Cloudflare Pages does not run the Node gateway, so its index/runtime pages stay in Mock mode unless another backend is explicitly configured.
+- The gateway's text gateway and the perception detector are independent: the detector does not call the gateway, and the gateway does not proxy model weights. The comparison and smoke clients send no data until explicitly launched. [DeepSeek models and pricing](https://api-docs.deepseek.com/quick_start/pricing/)
 
 ## Evaluate
 

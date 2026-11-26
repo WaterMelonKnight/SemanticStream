@@ -57,6 +57,17 @@
 - Connect the Phase 3R sampling and retrieval pipeline to the independent Lab with a synthetic system monitor, procedural source, local files and an opt-in camera.
 - Replay identical simulated events under equivalent budgets. Publish per-event latencies, failures, stale suppression and usage accounting in [the Phase 4A report](benchmarks/results/phase4a-runtime.md).
 
+## Phase 4P.1 · Lightweight visual perception experiment
+
+- Add an independent `/perception.html` experiment that reuses camera/local-video adapters and leaves the Phase 4A scheduler, provider, and runtime lab unchanged.
+- Put a model-agnostic `ObjectDetectorProvider` boundary in front of MediaPipe Object Detector + EfficientDet-Lite0 int8 inside a module Web Worker.
+- Keep the model off by default; require an explicit user enable, show load/failure states, and keep the source preview usable when inference is unavailable.
+- Prepare 320 × 320 letterboxed input, bound work to one in-flight plus one latest pending request, and combine fixed 2–5 FPS with change-triggered + periodic scheduling.
+- Emit structured `ObjectObservation` records with session, frame, capture/submission/completion time, category, score, source box, detector/model version, and evidence reference.
+- Correctly invalidate sessions on source switch, video load/seek/restart, camera stop, worker unload, and page exit; reject late results.
+- Benchmark fixed vs adaptive scheduling for load time, model bytes, P50/P95 inference, batches, effective FPS, drops, and page long tasks; do not report accuracy without labels.
+- Record runtime/model licenses, versions, sizes, deployment limits, and the YOLOX-Nano + ONNX Runtime Web feasibility.
+
 ## Phase 4A+1 · Streaming text gateway
 
 - Add opt-in DeepSeek and OpenAI-compatible SSE profiles behind a local Node gateway. Keep credentials and persistent cost admission server-side.

@@ -13,8 +13,26 @@ const ID = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}
 const KNOWN_REJECTIONS = new Set([400, 401, 402, 403, 404, 422, 429]);
 const MEDIA_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.png': 'image/png', '.json': 'application/json',
+  '.png': 'image/png', '.json': 'application/json', '.wasm': 'application/wasm',
 };
+const STATIC_FILES = /^(?:index\.html|runtime\.html|perception\.html|favicon\.png|assets\/[\w.-]+|benchmark\/[\w.-]+|mediapipe\/wasm\/vision_wasm_module_internal\.(?:js|wasm))$/;
+const BASE_CSP = "default-src 'self'; object-src 'none'; base-uri 'self'; media-src 'self' blob:; "
+  + "img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'";
+const PERCEPTION_CSP = "default-src 'self'; object-src 'none'; base-uri 'self'; media-src 'self' blob:; "
+  + "img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://storage.googleapis.com; "
+  + "script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; frame-ancestors 'none'";
+
+export function staticFileAllowed(fileName: string): boolean {
+  return STATIC_FILES.test(fileName) && !fileName.endsWith('/..');
+}
+
+export function mediaTypeFor(fileName: string): string | undefined {
+  return MEDIA_TYPES[extname(fileName)];
+}
+
+export function contentSecurityPolicyFor(fileName: string): string {
+  return fileName === 'perception.html' ? PERCEPTION_CSP : BASE_CSP;
+}
 
 function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -153,18 +171,18 @@ export function createGateway(config: GatewayConfig) {
     const path = req.url ?? '/';
     if (!path.startsWith('/api/')) {
       const fileName = path === '/' ? 'index.html' : path.slice(1);
-      if (req.method !== 'GET' || !/^(?:index\.html|runtime\.html|favicon\.png|assets\/[\w.-]+|benchmark\/[\w.-]+)$/.test(fileName)
-        || fileName.endsWith('/..')) { json(res, 404, {}); return; }
+      if (req.method !== 'GET' || !staticFileAllowed(fileName)) { json(res, 404, {}); return; }
       const file = join(config.dist, fileName);
       const info = await stat(file).catch(() => undefined);
       if (!info?.isFile()) { json(res, 404, {}); return; }
-      const type = MEDIA_TYPES[extname(file)];
+      const type = mediaTypeFor(file);
       if (!type) { json(res, 404, {}); return; }
-      res.writeHead(200, {
-        'Content-Type': type,
-        'Content-Security-Policy': "default-src 'self'; object-src 'none'; base-uri 'self'; media-src 'self' blob:; "
-          + "img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
-      });
+      const headers: Record<string, string> = { 'Content-Type': type };
+      // Apply CSP to documents only. A CSP on a worker script becomes the
+      // worker's policy and would otherwise drop the perception page's
+      // allowlisted model origin.
+      if (fileName.endsWith('.html')) headers['Content-Security-Policy'] = contentSecurityPolicyFor(fileName);
+      res.writeHead(200, headers);
       res.end(await readFile(file));
       return;
     }
