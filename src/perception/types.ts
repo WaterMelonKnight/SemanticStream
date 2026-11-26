@@ -1,6 +1,7 @@
 export const MEDIAPIPE_RUNTIME_VERSION = '1.2.3';
 /** Self-hosted by scripts/prepare-mediapipe-wasm.mjs; kept here for documentation. */
 export const MEDIAPIPE_WASM_PATH = 'mediapipe/wasm';
+export const MEDIAPIPE_WASM_VERSIONED_PATH = `${MEDIAPIPE_WASM_PATH}/${MEDIAPIPE_RUNTIME_VERSION}`;
 export const EFFICIENTDET_MODEL_URL =
   'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/int8/1/efficientdet_lite0.tflite';
 export const EFFICIENTDET_MODEL_BYTES = 4_602_795;

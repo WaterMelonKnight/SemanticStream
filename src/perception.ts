@@ -20,7 +20,7 @@ import {
   EFFICIENTDET_MODEL_VERSION,
   MAX_OBSERVATIONS,
   MEDIAPIPE_RUNTIME_VERSION,
-  MEDIAPIPE_WASM_PATH,
+  MEDIAPIPE_WASM_VERSIONED_PATH,
   MODEL_INPUT_SIZE,
   PROBE_HEIGHT,
   PROBE_WIDTH,
@@ -139,7 +139,7 @@ modelCanvas.width = MODEL_INPUT_SIZE;
 modelCanvas.height = MODEL_INPUT_SIZE;
 const modelContext = context2d(modelCanvas);
 const transform = createSourceTransform(FEED_WIDTH, FEED_HEIGHT, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
-const wasmUrl = new URL(MEDIAPIPE_WASM_PATH, document.baseURI).href;
+const wasmUrl = new URL(MEDIAPIPE_WASM_VERSIONED_PATH, document.baseURI).href;
 
 let provider: ObjectDetectorProvider | undefined;
 let modelState: ModelState = supportsPerception() ? 'idle' : 'unsupported';

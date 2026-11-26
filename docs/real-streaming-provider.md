@@ -52,7 +52,7 @@ Run `npm run gateway` and open `http://127.0.0.1:4180/runtime.html`. The server 
 
 ### Static pages, CSP and the perception experiment
 
-- `.wasm` is served as `application/wasm`; model weights are **not** in `dist` and are not served by the gateway.
+- The versioned MediaPipe module path is served with native `.js`/`.wasm` MIME types; model weights are **not** in `dist` and are not served by the gateway.
 - `index.html` and `runtime.html` keep the original CSP (`default-src 'self'`; no `wasm-unsafe-eval`, no external connect).
 - `perception.html` gets a page-specific CSP that additionally permits `script-src 'self' 'wasm-unsafe-eval'`, `worker-src 'self' blob:`, and `connect-src 'self' https://storage.googleapis.com` for the optional EfficientDet-Lite0 download. No other cross-origin connect is allowlisted.
 - The perception model is fetched only after the user clicks **Enable model**. Media upload remains absent; the gateway's text API is the only path to a real text model.

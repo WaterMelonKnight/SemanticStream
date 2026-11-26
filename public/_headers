@@ -1,6 +1,9 @@
+/perception
 /perception.html
   Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'; media-src 'self' blob:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://storage.googleapis.com; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; frame-ancestors 'none'
 
-/mediapipe/wasm/*
-  Content-Type: application/wasm
+# MediaPipe runtime files are copied under a version directory so immutable
+# caching cannot mix a new JS loader with an old Wasm binary. Do not override
+# Content-Type for the whole directory: that would mislabel JavaScript as Wasm.
+/mediapipe/wasm/1.2.3/*
   Cache-Control: public, max-age=31536000, immutable

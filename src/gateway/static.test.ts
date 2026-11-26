@@ -10,8 +10,8 @@ describe('gateway static security policy', () => {
     for (const name of [
       'index.html', 'runtime.html', 'perception.html', 'favicon.png',
       'assets/index-abc123.js', 'assets/perception-abc123.css', 'benchmark/latest.json',
-      'mediapipe/wasm/vision_wasm_module_internal.js',
-      'mediapipe/wasm/vision_wasm_module_internal.wasm',
+      'mediapipe/wasm/1.2.3/vision_wasm_module_internal.js',
+      'mediapipe/wasm/1.2.3/vision_wasm_module_internal.wasm',
     ]) expect(staticFileAllowed(name), name).toBe(true);
   });
 
@@ -23,7 +23,7 @@ describe('gateway static security policy', () => {
   });
 
   it('serves Wasm with the registered MIME type', () => {
-    expect(mediaTypeFor('mediapipe/wasm/vision_wasm_module_internal.wasm')).toBe('application/wasm');
+    expect(mediaTypeFor('mediapipe/wasm/1.2.3/vision_wasm_module_internal.wasm')).toBe('application/wasm');
     expect(mediaTypeFor('perception.html')).toBe('text/html; charset=utf-8');
     expect(mediaTypeFor('models/efficientdet_lite0.tflite')).toBeUndefined();
   });
@@ -43,18 +43,18 @@ describe('gateway static security policy', () => {
 describe('gateway perception static route', () => {
   it('serves perception and module wasm with page-specific CSP, while refusing model weights', async () => {
     const dist = await mkdtemp(join(tmpdir(), 'semanticstream-static-'));
-    await mkdir(join(dist, 'mediapipe', 'wasm'), { recursive: true });
+    await mkdir(join(dist, 'mediapipe', 'wasm', '1.2.3'), { recursive: true });
     await mkdir(join(dist, 'assets'), { recursive: true });
     await writeFile(join(dist, 'perception.html'), '<!doctype html><title>perception</title>');
     await writeFile(join(dist, 'assets', 'detector.worker-test.js'), 'self.onmessage = () => {};');
-    await writeFile(join(dist, 'mediapipe', 'wasm', 'vision_wasm_module_internal.wasm'), new Uint8Array([0, 97, 115, 109]));
+    await writeFile(join(dist, 'mediapipe', 'wasm', '1.2.3', 'vision_wasm_module_internal.wasm'), new Uint8Array([0, 97, 115, 109]));
     const fixture = await localGateway(undefined, { dist });
     try {
       const page = await fetch(fixture.origin + '/perception.html');
       expect(page.status).toBe(200);
       expect(page.headers.get('content-security-policy')).toContain("'wasm-unsafe-eval'");
       expect(page.headers.get('content-security-policy')).toContain('https://storage.googleapis.com');
-      const wasm = await fetch(fixture.origin + '/mediapipe/wasm/vision_wasm_module_internal.wasm');
+      const wasm = await fetch(fixture.origin + '/mediapipe/wasm/1.2.3/vision_wasm_module_internal.wasm');
       expect(wasm.status).toBe(200);
       expect(wasm.headers.get('content-type')).toBe('application/wasm');
       const worker = await fetch(fixture.origin + '/assets/detector.worker-test.js');
