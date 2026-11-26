@@ -17,6 +17,7 @@ export interface TelemetryRecordInput extends TelemetryIdentity {
   readonly value?: number;
   readonly unit?: string;
   readonly source: TelemetrySource;
+  readonly critical?: boolean;
   /** Low-cardinality only. Never put prompts, media, keys, tokens or model output here. */
   readonly attributes?: Readonly<Record<string, string | number | boolean>>;
 }

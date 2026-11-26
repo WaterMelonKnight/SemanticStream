@@ -62,12 +62,14 @@ Phase 4O adds a bounded, page-scoped telemetry protocol and a cost/observability
 
 Perception and inference remain independent. The Runtime Lab panel explicitly says that perception telemetry is exported from `/perception.html`; no shared session is fabricated.
 
-## Cost dashboard
+## Cost dashboard and admission
 
 The Runtime Lab Cost panel uses `GatewayStreamingProvider.budget()` -> `GET /api/runtime` and `costView()`:
 
 - Total budget, settled, reserved, provisional, available, utilization.
-- Accepted / request limit, quarantined slots, admission frozen.
+- Accepted / request limit, quarantined slots, and four distinct admission constraints.
+- `ledgerOpen` alone is not treated as permission to admit: cost sufficiency, request count and slot capacity are evaluated separately.
+- Admission states include `open`, `ledger_frozen`, `cost_exhausted`, `request_limit`, and `slots_full`; multiple reasons can apply.
 - Values are integer nano-USD internally; UI formats USD with six decimal places.
 - The label states **configured-price estimate, not a vendor invoice**. Actual provider billing can differ.
 - Mock mode shows `Unavailable` and `—`, never a synthetic zero.
@@ -85,21 +87,33 @@ The Runtime Lab Cost panel uses `GatewayStreamingProvider.budget()` -> `GET /api
 
 ## OpenTelemetry boundary
 
-No exporter, collector, Prometheus, or Grafana is deployed. `telemetryToOpenTelemetryHint` maps an event to a future OTel name and attributes:
+No exporter, collector, Prometheus, or Grafana is deployed. `telemetryToOpenTelemetryHint` returns separate metric and trace bags:
 
 - metric name: `semanticstream.<module>.<name>`
-- resource: source and environment (not yet emitted)
-- low-cardinality attributes only
-- high-cardinality IDs become span/event attributes, not metric dimensions
+- `metricAttributes`: source plus low-cardinality attributes only
+- `traceAttributes`: session/task/request/provider request IDs for span/event attributes
+- session/task/request IDs are **never** metric dimensions
 - counters/gauges/histograms map to OTel instruments
 - structured runtime events map to span events/log records
 
 A future exporter must be opt-in, bounded, and asynchronous; it must not make the inference path depend on a collector.
 
+## Final-review hardening
+
+- Cloudflare `_headers` now contains two independent full CSP blocks for `/perception` and `/perception.html`; tests parse the rule blocks rather than searching for a shared path line.
+- Budget polling and the cost timer are stopped on `pagehide`, generation-invalidated, and recreated on a persisted `pageshow`; late results cannot update the restored/old session.
+- Telemetry retains critical terminal events in a separate bounded ring, filters scheduler/model records by the current runtime session, and does not clear all history on a visual reset.
+- Series capacity uses replacement of the oldest session series rather than dropping every new session.
+- Telemetry error attributes use the finite `DiagnosticCode` set; no free-text scheduler/provider reason is exported.
+- OTel metric and trace attribute sets are separate; IDs are trace-only.
+- The cost view distinguishes ledger-open from actually admissible (cost, request count, slots).
+- Node gateway docs use GET response headers because the gateway has no HEAD route.
+
 ## Tests
 
-- `src/observability/telemetry.test.ts`: bounded events/series, reset/session isolation, sensitive-attribute filtering, JSON/CSV, OTel mapping.
-- `src/observability/cost.test.ts`: nano-USD arithmetic, available/utilization, frozen/quarantine, invalid ledger.
+- `src/observability/telemetry.test.ts`: bounded events/series, critical terminal reserve, old-session series eviction, reset/session isolation, sensitive-attribute filtering, JSON/CSV, metric-vs-trace OTel mapping.
+- `src/observability/diagnostics.test.ts`: finite reason-to-code mapping and free-text rejection.
+- `src/observability/cost.test.ts`: nano-USD arithmetic, available/utilization, frozen/quarantine, cost/request/slot admission separation, invalid ledger.
 - `src/observability/budget-poller.test.ts`: no overlapping fetches, error-as-data.
 - `src/observability/summary.test.ts`: outcome counts, P50/P95, known/unknown usage, stale/blocked, unanswered.
 - Gateway tests cover ledger persistence, quarantine, overrun/frozen, and `/api/runtime` budget.
@@ -123,9 +137,10 @@ npm ci
 npm run build
 # Configure SS_* as documented, then:
 npm run gateway
-curl -I http://127.0.0.1:4180/perception.html
-curl -I http://127.0.0.1:4180/mediapipe/wasm/1.2.3/vision_wasm_module_internal.wasm
-curl -I http://127.0.0.1:4180/mediapipe/wasm/1.2.3/vision_wasm_module_internal.js
+# The gateway has no HEAD route; use GET and discard the body.
+curl -s -D - -o /dev/null http://127.0.0.1:4180/perception.html
+curl -s -D - -o /dev/null http://127.0.0.1:4180/mediapipe/wasm/1.2.3/vision_wasm_module_internal.wasm
+curl -s -D - -o /dev/null http://127.0.0.1:4180/mediapipe/wasm/1.2.3/vision_wasm_module_internal.js
 ```
 
 Expect HTML CSP only on documents, `.wasm` = `application/wasm`, `.js` = `text/javascript`, and model-weight URLs 404. A seeded ledger can produce the cost values above without any paid call.
@@ -136,11 +151,13 @@ Online verification: **NOT_RUN**. No authorized Cloudflare Preview Deployment wa
 
 ```sh
 npm run build
-npx wrangler pages dev dist --port 8788
-curl -sI http://127.0.0.1:8788/perception
-curl -sI http://127.0.0.1:8788/perception.html
-curl -sI http://127.0.0.1:8788/mediapipe/wasm/1.2.3/vision_wasm_module_internal.wasm
-curl -sI http://127.0.0.1:8788/mediapipe/wasm/1.2.3/vision_wasm_module_internal.js
+npx --yes wrangler@4.168.0 pages dev dist --ip 127.0.0.1 --port 8788
+curl -s -D - -o /dev/null http://127.0.0.1:8788/perception
+curl -s -D - -o /dev/null http://127.0.0.1:8788/perception.html
+curl -s -D - -o /dev/null http://127.0.0.1:8788/mediapipe/wasm/1.2.3/vision_wasm_module_internal.wasm
+curl -s -D - -o /dev/null http://127.0.0.1:8788/mediapipe/wasm/1.2.3/vision_wasm_module_internal.js
 ```
+
+**Wrangler local verification attempt:** Wrangler **4.168.0** was invoked, but `workerd` failed in this proot environment with a tcmalloc virtual-address/OOM error before serving a port. Therefore Wrangler header/redirect verification is also **NOT_RUN**; no successful local Pages result is claimed.
 
 Check `/perception` and `/perception.html` both receive the page CSP, the JS file is not mislabeled as Wasm, the Wasm file is `application/wasm`, navigation between `/`, `/runtime.html`, `/perception` works, the worker starts, the model downloads only after opt-in, and camera permission works on HTTPS. Then run the same checks in a Cloudflare Preview Deployment before release. Static hosting does not run the Node gateway; index/runtime remain Mock unless another backend is configured.

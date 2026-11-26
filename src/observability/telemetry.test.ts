@@ -21,6 +21,26 @@ describe('bounded telemetry hub', () => {
     expect(snapshot.droppedSeries).toBe(1);
   });
 
+  it('reserves critical terminal events when ordinary high-frequency events fill the ring', () => {
+    const hub = new TelemetryHub(2, 2, 1);
+    hub.event(1, 'scheduler', 'task_completed', 'mock', {}, { code: 'completed' }, true);
+    hub.event(2, 'decision', 'decision', 'mock');
+    hub.event(3, 'decision', 'decision', 'mock');
+    hub.event(4, 'decision', 'decision', 'mock');
+    expect(hub.snapshot().events.map((event) => event.name)).toContain('task_completed');
+    expect(hub.snapshot().events.filter((event) => event.name === 'decision')).toHaveLength(2);
+  });
+
+  it('evicts the oldest series rather than refusing new sessions', () => {
+    const hub = new TelemetryHub(20, 2, 10);
+    for (let index = 0; index < 30; index += 1) {
+      hub.gauge(index, 'runtime', 'queue_depth', index, 'tasks', 'mock', { sessionId: 's' + index });
+    }
+    const snapshot = hub.snapshot();
+    expect(snapshot.series.length).toBeLessThanOrEqual(24);
+    expect(snapshot.series.some((series) => series.sessionId === 's29')).toBe(true);
+  });
+
   it('supports session isolation and reset', () => {
     const hub = new TelemetryHub(10, 5);
     hub.event(1, 'runtime', 'session_start', 'mock', { sessionId: 'a' });
@@ -53,7 +73,11 @@ describe('bounded telemetry hub', () => {
     hub.histogram(10, 'scheduler', 'first_text_ms', 42, 'ms', 'fixture', { requestId: 'r1', taskId: 3 });
     const hint = telemetryToOpenTelemetryHint(hub.snapshot().events[0]);
     expect(hint.name).toBe('semanticstream.scheduler.first_text_ms');
-    expect(hint.attributes['semanticstream.source']).toBe('fixture');
-    expect(hint.attributes['semanticstream.request_id']).toBe('r1');
+    expect(hint.metricAttributes['semanticstream.source']).toBe('fixture');
+    expect(hint.metricAttributes['semanticstream.session_id']).toBeUndefined();
+    expect(hint.metricAttributes['semanticstream.task_id']).toBeUndefined();
+    expect(hint.metricAttributes['semanticstream.request_id']).toBeUndefined();
+    expect(hint.traceAttributes['semanticstream.request_id']).toBe('r1');
+    expect(hint.traceAttributes['semanticstream.task_id']).toBe(3);
   });
 });

@@ -9,6 +9,9 @@ import { BudgetPoller } from './observability/budget-poller';
 import { costView, formatUsd, formatUtilization } from './observability/cost';
 import type { CostView } from './observability/cost';
 import { summarizeRuntime } from './observability/summary';
+import { diagnosticCode } from './observability/diagnostics';
+import { isCurrentRuntimeSession, runtimeSessionId } from './observability/session';
+import { CostGeneration } from './observability/cost-generation';
 import { TelemetryHub } from './observability/telemetry';
 import type { TelemetryEvent, TelemetrySource } from './observability/types';
 import { InferenceScheduler } from './inference/scheduler';
@@ -59,7 +62,7 @@ const telemetryState = element('telemetry-state');
 let cost: CostView | null = null;
 let costAt: number | null = null;
 let costError = '';
-let costGeneration = 0;
+const costGeneration = new CostGeneration();
 let budgetPoller: BudgetPoller | undefined;
 let costTimer: number | undefined;
 let lastTelemetryAt = 0;
@@ -142,8 +145,6 @@ function processFrame(frame: StreamFrame<VisualFrame>): void {
 }
 
 function resetSampling(): void {
-  telemetry.clear();
-  seenOutcomes.clear();
   lastTelemetryAt = 0;
   session?.dispose();
   pendingScenario = undefined;
@@ -299,7 +300,7 @@ function renderCost(): void {
       setCostField(field, '—');
     }
     costFields.detail.textContent = costError
-      ? 'Gateway cost is unavailable: ' + costError + '. Inference is not blocked by this dashboard query.'
+      ? 'Gateway cost is unavailable. Inference is not blocked by this dashboard query.'
       : 'Fetching configured gateway ledger…';
     return;
   }
@@ -314,10 +315,16 @@ function renderCost(): void {
   setCostField(costFields.utilization, formatUtilization(cost.utilization), cost.utilization >= 0.8);
   setCostField(costFields.accepted, cost.accepted + ' / ' + cost.requestLimit);
   setCostField(costFields.quarantined, String(cost.quarantined), cost.quarantined > 0);
-  setCostField(costFields.frozen, cost.frozen ? 'FROZEN' : 'open', cost.frozen);
+  const admission = cost.admission;
+  const admissionText = admission.canAdmit ? 'open'
+    : admission.reasons.map((reason) => reason === 'ledger_frozen' ? 'ledger frozen'
+      : reason === 'cost_exhausted' ? 'cost exhausted'
+        : reason === 'request_limit' ? 'request limit' : 'slots full').join(' · ');
+  setCostField(costFields.frozen, admissionText, !admission.canAdmit);
   const updated = costAt === null ? 'unknown time' : new Date(costAt).toLocaleTimeString();
-  costFields.detail.textContent = (stale ? 'Last refresh failed: ' + costError + '. Showing the last known ledger. ' : '')
+  costFields.detail.textContent = (stale ? 'Last refresh failed. Showing the last known ledger. ' : '')
     + 'Updated ' + updated + '. This is a configured-price estimate from the gateway ledger, not a vendor invoice.';
+  if (!admission.canAdmit) costFields.detail.textContent += ' Admission is blocked: ' + admissionText + '.';
 }
 
 async function refreshCost(): Promise<void> {
@@ -325,9 +332,9 @@ async function refreshCost(): Promise<void> {
     renderCost();
     return;
   }
-  const generation = costGeneration;
+  const generation = costGeneration.current();
   const result = await budgetPoller.poll();
-  if (generation !== costGeneration) return;
+  if (!costGeneration.isCurrent(generation)) return;
   if (result.status === 'updated') {
     try {
       cost = costView(result.budget);
@@ -386,24 +393,25 @@ function renderObservability(): void {
       telemetry.gauge(now, 'context', 'transfer_bytes', evidence.retrieval.budget.total.usedBytes, 'bytes', source, identity);
     }
     for (const record of snapshot.records) {
-      if (!record.task) continue;
+      if (!record.task || !isCurrentRuntimeSession(record.task.session, snapshot.sessionVersion)) continue;
+      const taskSessionId = runtimeSessionId(record.task.session);
       if (record.kind === 'end' && record.outcome) {
-        const key = record.atMs + ':' + record.task.id + ':' + record.outcome;
+        const key = record.task.session + ':' + record.task.id + ':' + record.outcome;
         if (!rememberOutcome(key)) continue;
         telemetry.event(record.atMs, 'scheduler', 'task_' + record.outcome, source, {
-          sessionId: telemetrySession(),
+          sessionId: taskSessionId,
           taskId: record.task.id,
           requestId: record.task.requestId,
-        }, { reason: (record.reason ?? '').slice(0, 64) });
+        }, { code: diagnosticCode(record.reason ?? record.outcome) }, true);
       } else if (record.kind === 'upstream') {
-        const key = record.atMs + ':' + record.task.id + ':upstream';
+        const key = record.task.session + ':' + record.task.id + ':upstream';
         if (!rememberOutcome(key)) continue;
         telemetry.event(record.atMs, 'model', 'terminal', source, {
-          sessionId: telemetrySession(),
+          sessionId: taskSessionId,
           taskId: record.task.id,
           requestId: record.task.requestId,
           providerRequestId: record.providerRequestId,
-        }, { usageUnknown: record.usageUnknown ?? false });
+        }, { code: record.usageUnknown ? 'usage_unknown' : 'terminal' }, true);
       }
     }
   }
@@ -426,11 +434,19 @@ function renderObservability(): void {
       + ' · event→effective ' + msOrDash(summary.effectiveOutput.p50Ms) + ' / ' + msOrDash(summary.effectiveOutput.p95Ms)
       + ' · upstream ' + msOrDash(summary.upstream.p50Ms) + ' / ' + msOrDash(summary.upstream.p95Ms),
     'tokens · ' + summary.knownUsage + ' known (' + summary.inputTokens + ' in / ' + summary.outputTokens + ' out) · ' + summary.unknownUsage + ' unknown · ' + summary.staleOutputs + ' stale blocked · ' + summary.blockedOutputs + ' total blocked',
-    'reasons · ' + (Object.entries(summary.reasons).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([reason, count]) => reason + ' ×' + count).join(' · ') || '—'),
+    'reasons · ' + (() => {
+      const counts = new Map<string, number>();
+      for (const [reason, count] of Object.entries(summary.reasons)) {
+        const code = diagnosticCode(reason);
+        counts.set(code, (counts.get(code) ?? 0) + count);
+      }
+      return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+        .map(([code, count]) => code + ' ×' + count).join(' · ') || '—';
+    })(),
     cost
       ? 'cost · ' + formatUsd(cost.settledNanoUsd) + ' settled · ' + formatUsd(cost.reservedNanoUsd) + ' reserved · '
         + formatUsd(cost.provisionalNanoUsd) + ' provisional · ' + formatUsd(cost.availableNanoUsd) + ' available · '
-        + formatUtilization(cost.utilization) + ' · ' + (cost.frozen ? 'FROZEN' : 'open') + (costError ? ' · stale' : '')
+        + formatUtilization(cost.utilization) + ' · ' + (cost.admission.canAdmit ? 'admission open' : 'admission blocked') + (costError ? ' · stale' : '')
       : 'cost · unavailable (Mock or not yet fetched); unknown is not zero',
   ];
   list('telemetry-summary', lines);
@@ -612,7 +628,7 @@ function useMock(): void {
   gatewayConnectGeneration += 1;
   runtime.newSession();
   gateway = undefined;
-  costGeneration += 1;
+  costGeneration.next();
   budgetPoller = undefined;
   cost = null;
   costAt = null;
@@ -644,7 +660,7 @@ element<HTMLFormElement>('gateway-controls').onsubmit = async (e) => {
     const adapter = await GatewayStreamingProvider.connect(token);
     if (generation !== gatewayConnectGeneration) return;
     gateway = adapter;
-    costGeneration += 1;
+    costGeneration.next();
     budgetPoller = new BudgetPoller(() => adapter.budget());
     cost = null;
     costAt = null;
@@ -674,21 +690,38 @@ element<HTMLFormElement>('gateway-controls').onsubmit = async (e) => {
   }
 };
 
+function startCostPolling(): void {
+  if (costTimer !== undefined) window.clearInterval(costTimer);
+  costTimer = window.setInterval(() => {
+    if (gateway && document.visibilityState === 'visible') void refreshCost();
+  }, 4_000);
+}
+
 window.addEventListener('pagehide', () => {
   gatewayConnectGeneration += 1;
+  costGeneration.next();
   window.clearInterval(refresh);
+  refresh = undefined;
   if (costTimer !== undefined) window.clearInterval(costTimer);
+  costTimer = undefined;
   budgetPoller = undefined;
   stopSource();
   session?.dispose();
   session = undefined;
   runtime.newSession();
 });
-window.addEventListener('pageshow', (e) => {
-  if (!e.persisted) return;
+window.addEventListener('pageshow', (event) => {
+  if (!event.persisted) return;
+  window.clearInterval(refresh);
   if (!gateway) element<HTMLButtonElement>('enable-gateway').disabled = false;
   useScene();
   refresh = window.setInterval(render, 200);
+  if (gateway) {
+    costGeneration.next();
+    budgetPoller = new BudgetPoller(() => gateway!.budget());
+    void refreshCost();
+  }
+  startCostPolling();
 });
 
 element('cost-refresh').onclick = () => void refreshCost();
@@ -700,9 +733,7 @@ element('telemetry-clear').onclick = () => {
   lastTelemetryAt = 0;
   renderObservability();
 };
-costTimer = window.setInterval(() => {
-  if (gateway && document.visibilityState === 'visible') void refreshCost();
-}, 4_000);
+startCostPolling();
 
 useScene();
 refresh = window.setInterval(render, 200);

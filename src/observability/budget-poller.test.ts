@@ -3,7 +3,7 @@ import { BudgetPoller } from './budget-poller';
 
 function budget() {
   return {
-    held: 0, quarantined: 0, accepted: 0, requestLimit: 20, limitNanoUsd: 100,
+    held: 0, slots: 2, quarantined: 0, accepted: 0, requestLimit: 20, limitNanoUsd: 100,
     costPerRequestNanoUsd: 1, settledNanoUsd: 0, provisionalNanoUsd: 0, reservedNanoUsd: 0, blocked: false,
   };
 }

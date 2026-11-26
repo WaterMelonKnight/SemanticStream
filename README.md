@@ -67,7 +67,7 @@ The Live Vision Runtime Lab is the local Control Center for scheduler, model, vi
 - JSON/CSV export is user-triggered and bounded. No API keys, tokens, prompts, images, video, raw model output or evidence payloads are recorded.
 - The Perception Lab is a separate runtime. Its telemetry and detector metrics are exported on `/perception.html`; the Runtime Lab does not fabricate one end-to-end session.
 
-Read [runtime observability](docs/runtime-observability.md) for the existing-metrics audit, protocol, source/cardinality rules, OpenTelemetry mapping boundary, and measured dashboard values.
+Read [runtime observability](docs/runtime-observability.md) for the existing-metrics audit, protocol, critical-event reserve, source/cardinality rules, metric-vs-trace OpenTelemetry boundary, admission states, deployment verification, and measured dashboard values.
 
 ## Bounded context buffer
 
@@ -200,9 +200,9 @@ Tests cover:
 - Existing sampler, video lifecycle, Phase 1B fixtures/benchmark, timeline, rate, and formatting tests.
 - Inference snapshot ownership, queue/dependency behavior, stale partial suppression, terminal evidence, reservations and deterministic replay across four scheduler/capacity combinations.
 - Perception geometry/letterbox mapping, fixed/adaptive trigger, bounded latest-frame queue, and latency/FPS/drop metrics.
-- Telemetry bounds/session isolation/privacy filtering/JSON-CSV/OTel mapping; gateway cost arithmetic, frozen/quarantine state, non-overlap polling and error degradation; runtime outcome/latency summaries.
+- Telemetry critical-terminal reserve, session identity, LRU series capacity, sensitive filtering, JSON/CSV and metric-vs-trace OTel mapping; cost-generation invalidation, frozen/cost/request/slot admission states, non-overlap polling and error degradation; runtime outcome/latency summaries.
 
-GitHub Actions runs install, typecheck, all tests, the four replay suites, and the three-page static build (visual demo, runtime lab, perception experiment). For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. The static build contains the three pages and the generated self-hosted Wasm; the model is fetched from its pinned Google Storage URL only after opt-in. No Cloudflare bindings are required. The static build also emits `public/_headers` for Cloudflare Pages: it relies on native `.js`/`.wasm` MIME types, scopes an immutable cache to the versioned runtime path, and applies a page-specific CSP to `/perception` and `/perception.html`. If a custom CSP is used, mirror the policy in [the gateway deployment notes](docs/real-streaming-provider.md) instead of weakening the runtime page: it needs `wasm-unsafe-eval`, `worker-src`, and `connect-src https://storage.googleapis.com`.
+GitHub Actions runs install, typecheck, all tests, the four replay suites, and the three-page static build (visual demo, runtime lab, perception experiment). For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. The static build contains the three pages and the generated self-hosted Wasm; the model is fetched from its pinned Google Storage URL only after opt-in. No Cloudflare bindings are required. The static build also emits `public/_headers` for Cloudflare Pages: it relies on native `.js`/`.wasm` MIME types, scopes an immutable cache to the versioned runtime path, and applies two independent complete CSP rule blocks to `/perception` and `/perception.html`. If a custom CSP is used, mirror the policy in [the gateway deployment notes](docs/real-streaming-provider.md) instead of weakening the runtime page: it needs `wasm-unsafe-eval`, `worker-src`, and `connect-src https://storage.googleapis.com`.
 
 ### Browser checklist
 

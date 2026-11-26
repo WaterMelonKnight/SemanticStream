@@ -36,6 +36,7 @@ function cleanAttributes(
  */
 export class TelemetryHub {
   private readonly events: BoundedTimeline<TelemetryEvent>;
+  private readonly criticalEvents: BoundedTimeline<TelemetryEvent>;
   private readonly series = new Map<string, BoundedTimeline<{ atMs: number; value: number }>>();
   private readonly seriesMeta = new Map<string, { name: string; sessionId?: string; unit?: string; source: TelemetrySource }>();
   private readonly seriesCapacity: number;
@@ -43,8 +44,9 @@ export class TelemetryHub {
   private droppedEvents = 0;
   private droppedSeries = 0;
 
-  constructor(eventCapacity = 400, seriesCapacity = 160) {
+  constructor(eventCapacity = 400, seriesCapacity = 160, criticalCapacity = 128) {
     this.events = new BoundedTimeline<TelemetryEvent>(Math.max(1, eventCapacity));
+    this.criticalEvents = new BoundedTimeline<TelemetryEvent>(Math.max(1, criticalCapacity));
     this.seriesCapacity = Math.max(1, seriesCapacity);
   }
 
@@ -55,9 +57,10 @@ export class TelemetryHub {
       attributes: cleanAttributes(input.attributes),
       id: ++this.nextId,
     };
-    const previous = this.events.size;
-    this.events.push(event);
-    if (previous >= this.events.capacity) this.droppedEvents += 1;
+    const target = input.critical ? this.criticalEvents : this.events;
+    const previous = target.size;
+    target.push(event);
+    if (previous >= target.capacity) this.droppedEvents += 1;
     if (input.kind === 'gauge' || input.kind === 'histogram') {
       if (input.value !== undefined && Number.isFinite(input.value)) this.pushSeries(input, input.value);
     }
@@ -71,8 +74,9 @@ export class TelemetryHub {
     source: TelemetrySource,
     identity: TelemetryIdentity = {},
     attributes?: TelemetryRecordInput['attributes'],
+    critical = false,
   ): TelemetryEvent | undefined {
-    return this.record({ atMs, module, kind: 'event', name, source, ...identity, attributes });
+    return this.record({ atMs, module, kind: 'event', name, source, ...identity, attributes, critical });
   }
 
   gauge(
@@ -112,7 +116,8 @@ export class TelemetryHub {
 
   snapshot(): TelemetrySnapshot {
     return {
-      events: this.events.toArray(),
+      events: [...this.events.toArray(), ...this.criticalEvents.toArray()]
+        .sort((left, right) => left.atMs - right.atMs || left.id - right.id),
       series: [...this.series.entries()].map(([name, points]) => {
         const meta = this.seriesMeta.get(name);
         return {
@@ -130,6 +135,7 @@ export class TelemetryHub {
 
   clear(): void {
     this.events.clear();
+    this.criticalEvents.clear();
     this.series.clear();
     this.seriesMeta.clear();
     this.droppedEvents = 0;
@@ -138,9 +144,11 @@ export class TelemetryHub {
   }
 
   clearSession(sessionId: string): void {
-    const kept = this.events.toArray().filter((event) => event.sessionId !== sessionId);
-    this.events.clear();
-    for (const event of kept) this.events.push(event);
+    for (const timeline of [this.events, this.criticalEvents]) {
+      const kept = timeline.toArray().filter((event) => event.sessionId !== sessionId);
+      timeline.clear();
+      for (const event of kept) timeline.push(event);
+    }
     for (const key of [...this.series.keys()]) {
       if (key.startsWith(sessionId + ':')) {
         this.series.delete(key);
@@ -188,8 +196,12 @@ export class TelemetryHub {
     let points = this.series.get(key);
     if (!points) {
       if (this.series.size >= MAX_SERIES) {
+        const oldest = this.series.keys().next().value;
+        if (oldest !== undefined) {
+          this.series.delete(oldest);
+          this.seriesMeta.delete(oldest);
+        }
         this.droppedSeries += 1;
-        return;
       }
       points = new BoundedTimeline<{ atMs: number; value: number }>(this.seriesCapacity);
       this.series.set(key, points);
@@ -201,20 +213,28 @@ export class TelemetryHub {
   }
 }
 
-export function telemetryToOpenTelemetryHint(event: TelemetryEvent): {
-  name: string;
-  kind: TelemetryKind;
-  attributes: Record<string, string | number | boolean>;
-} {
+export interface OpenTelemetryHint {
+  readonly name: string;
+  readonly kind: TelemetryKind;
+  /** Low-cardinality metric dimensions only. Never put session/task/request IDs here. */
+  readonly metricAttributes: Readonly<Record<string, string | number | boolean>>;
+  /** High-cardinality span/event attributes. Never use these as metric dimensions. */
+  readonly traceAttributes: Readonly<Record<string, string | number>>;
+}
+
+export function telemetryToOpenTelemetryHint(event: TelemetryEvent): OpenTelemetryHint {
   return {
     name: `semanticstream.${event.module}.${event.name}`,
     kind: event.kind,
-    attributes: {
+    metricAttributes: {
       'semanticstream.source': event.source,
-      'semanticstream.session_id': event.sessionId ?? 'unattached',
+      ...(event.attributes ?? {}),
+    },
+    traceAttributes: {
+      ...(event.sessionId ? { 'semanticstream.session_id': event.sessionId } : {}),
       ...(event.taskId !== undefined ? { 'semanticstream.task_id': event.taskId } : {}),
       ...(event.requestId ? { 'semanticstream.request_id': event.requestId } : {}),
-      ...(event.attributes ?? {}),
+      ...(event.providerRequestId ? { 'semanticstream.provider_request_id': event.providerRequestId } : {}),
     },
   };
 }

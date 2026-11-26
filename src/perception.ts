@@ -150,7 +150,6 @@ let provider: ObjectDetectorProvider | undefined;
 let modelState: ModelState = supportsPerception() ? 'idle' : 'unsupported';
 let modelBytes = 0;
 let modelLoadMs: number | null = null;
-let modelError = '';
 let loadingStartedAt = 0;
 let modelReady = false;
 let sessionId = '';
@@ -232,7 +231,7 @@ function updateModelUi(): void {
   }
   if (modelState === 'error') {
     modelStatus.textContent = 'Detection unavailable';
-    modelDetail.textContent = `Model load failed: ${modelError}. The source and UI remain usable; retry with the button.`;
+    modelDetail.textContent = 'Model load failed. The source and UI remain usable; retry with the button.';
     enableModelButton.textContent = 'Retry model';
     enableModelButton.disabled = false;
     disableModelButton.hidden = true;
@@ -401,7 +400,6 @@ function submitDetection(request: DetectionRequest, pixels: ArrayBuffer): void {
       if (!inFlight) return;
       setDetectionStatus('Detection timed out; disabling the worker.', 'error');
       modelState = 'error';
-      modelError = 'Worker inference timed out.';
       modelReady = false;
       provider?.dispose();
       provider = undefined;
@@ -470,16 +468,15 @@ function handleDetection(result: DetectionResponse): void {
   if (next) submitDetection(next.request, next.pixels);
 }
 
-function handleDetectionError(error: Error): void {
+function handleDetectionError(): void {
   if (!modelReady) return;
-  telemetry.event(systemClockNow(), 'perception', 'worker_failed', 'unavailable', { sessionId }, { reason: error.message.slice(0, 80) });
+  telemetry.event(systemClockNow(), 'perception', 'worker_failed', 'unavailable', { sessionId }, { code: 'worker_failed' }, true);
   if (inFlight) {
     window.clearTimeout(inFlight.timeout);
     inFlight = null;
   }
   pending = null;
   modelState = 'error';
-  modelError = error.message;
   modelReady = false;
   provider?.dispose();
   provider = undefined;
@@ -590,7 +587,6 @@ async function enableModel(): Promise<void> {
     updateModelUi();
     return;
   }
-  modelError = '';
   modelState = 'loading';
   loadingStartedAt = performance.now();
   telemetry.event(systemClockNow(), 'model', 'load_started', 'real', { sessionId }, { model: EFFICIENTDET_MODEL_VERSION });
@@ -629,9 +625,8 @@ async function enableModel(): Promise<void> {
     renderObservations();
   } catch (error) {
     modelState = 'error';
-    modelError = error instanceof Error ? error.message : String(error);
     modelReady = false;
-    telemetry.event(systemClockNow(), 'model', 'load_failed', 'unavailable', { sessionId }, { reason: modelError.slice(0, 80) });
+    telemetry.event(systemClockNow(), 'model', 'load_failed', 'unavailable', { sessionId }, { code: 'model_load_failed' }, true);
     provider?.dispose();
     provider = undefined;
     loadProgress.hidden = true;

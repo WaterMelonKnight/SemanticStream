@@ -199,7 +199,7 @@ export function createGateway(config: GatewayConfig) {
       };
       const budget = ledger.snapshot();
       json(res, 200, { ...capabilities, budget: {
-        ...budget, quarantined: budget.held - active.size,
+        ...budget, quarantined: budget.held - active.size, slots: config.slots,
         requestLimit: config.maxRequests, limitNanoUsd: config.budgetNanoUsd,
         costPerRequestNanoUsd: config.inputReserve * config.inputNanoUsd + config.outputLimit * config.outputNanoUsd,
       } });
