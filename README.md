@@ -2,7 +2,7 @@
 
 **Less data. More understanding.**
 
-SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 added a bounded history buffer and active retrieval. Phase 3A adds a task-aware, pluggable decision boundary. Phase 3R hardens session lifetimes, resource admission and replay while keeping the browser demo local. See the [Phase 3R audit](docs/architecture-audit-phase3r.md) and [runtime architecture](docs/runtime-architecture-v2.md).
+SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 added a bounded history buffer and active retrieval. Phase 3A adds a task-aware, pluggable decision boundary. Phase 3R hardens session lifetimes, resource admission and replay while keeping the browser demo local. Phase 4P.1 adds an opt-in lightweight visual-perception experiment. See the [Phase 3R audit](docs/architecture-audit-phase3r.md) and [runtime architecture](docs/runtime-architecture-v2.md).
 
 Everything runs locally in the browser or in Node.js. The selected video is read through a local Object URL and drawn to Canvas; no video or frame is uploaded. The project requires no GPU, backend, database, model API, or paid service.
 
@@ -14,6 +14,8 @@ Use Node.js 24 and npm.
 npm ci
 npm run dev
 ```
+
+`npm run dev` prepares the self-hosted MediaPipe Wasm files from `node_modules`; `npm run build` does the same before emitting the static build. The Wasm assets are generated and ignored by git.
 
 The live demo compares a fixed sampler with a configurable adaptive sampler:
 
@@ -32,6 +34,20 @@ Choose **Serial FIFO**, **Concurrent FIFO**, or **SemanticStream** with one or t
 Run `npm run benchmark:runtime` for the deterministic Node.js experiment. It exercises priority, queue pressure, dependencies, deadlines and ignored cancellation with a scripted provider. The published latencies measure this simulation. [Replay results](benchmarks/results/phase4a-runtime.md)
 
 The next integration is a server-side DeepSeek streaming adapter for text and terminal usage, followed by opt-in bounded evidence for a vision-capable model. Optional TTS would consume only coordinator-authorized output. [Adapter requirements](docs/phase4a-duplex-runtime.md#next-adapters)
+
+## Lightweight visual perception (Phase 4P.1)
+
+Open `/perception.html` for an independent experiment that turns a camera or local video into structured object observations. It reuses the existing `CameraSource` and `VideoSource` adapters and does not change the runtime scheduler, provider, or runtime lab.
+
+- The real detector is **off by default**. Click **Enable model** to download EfficientDet-Lite0 int8 (~4.60 MB) and use the self-hosted MediaPipe Wasm runtime.
+- Inference runs in a module Web Worker on a 320 × 320 letterboxed input, never the 96 × 54 sampler thumbnail.
+- One request is in flight and at most one latest request is pending. Older pending frames are dropped and counted.
+- Fixed detection runs at 2–5 FPS. Adaptive detection combines a change probe with a periodic floor; it never relies only on frame difference.
+- Structured observations include session, frame sequence, capture/submission/completion time, category, score, source-pixel box, detector/model version, and an evidence reference.
+- Source switch, video load/seek/restart, camera stop, model unload, worker failure, and page exit invalidate sessions and reject late results.
+- The live benchmark compares fixed vs adaptive scheduling for 2 × 8 s and reports load time, bytes, P50/P95 inference, batches, effective FPS, drops, stale results, and long tasks. It reports **no accuracy** because there is no labeled dataset.
+
+The model/runtime licenses, exact versions, sizes, sources, CSP and deployment limits are in [docs/visual-perception-licenses.md](docs/visual-perception-licenses.md). Architecture, lifecycle, metrics definitions, and the future tracking/Object State Index design are in [docs/visual-perception.md](docs/visual-perception.md). Observed one-run browser numbers and device gaps are in [docs/visual-perception-results.md](docs/visual-perception-results.md).
 
 ## Bounded context buffer
 
@@ -162,21 +178,23 @@ Tests cover:
 - Decision features, rule scoring, heuristic-vs-probability labeling, timeout/fallback, invalid-action rejection, low-frequency scheduling, task-aware replay, task ROI metrics, and Phase 3A report generation.
 - Existing sampler, video lifecycle, Phase 1B fixtures/benchmark, timeline, rate, and formatting tests.
 - Inference snapshot ownership, queue/dependency behavior, stale partial suppression, terminal evidence, reservations and deterministic replay across four scheduler/capacity combinations.
+- Perception geometry/letterbox mapping, fixed/adaptive trigger, bounded latest-frame queue, and latency/FPS/drop metrics.
 
-GitHub Actions runs install, typecheck, all tests, the four replay suites, and the two-page static build. For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. No Cloudflare bindings are required.
+GitHub Actions runs install, typecheck, all tests, the four replay suites, and the three-page static build (visual demo, runtime lab, perception experiment). For Cloudflare Pages, use the repository root, `npm run build`, and `dist`; set `NODE_VERSION=24`. No Cloudflare bindings are required.
 
 ### Browser checklist
 
-The built page was exercised in headless Chromium with a 390 px viewport: timeline click retrieval, region crop, eviction error, retrieval budget denial, task selection/ROI editing, live decision log and gate, all benchmark panels, and no horizontal overflow. CI does not install a browser. Before a release, also check on real devices:
+The built pages were exercised in headless Chromium. The visual page covered timeline retrieval, region crop, eviction error, retrieval budget denial, task selection/ROI editing, live decision log and gate, and all benchmark panels. The perception page covered optional model load, detection, video seek/restart, live metrics, the two-phase benchmark, model unload, and a 390 px viewport with no horizontal overflow. CI does not install a browser. Before a release, also check on real devices:
 
 1. iPhone Safari: select a camera-roll MP4, play/pause/seek, click a recent timeline column, and crop a region.
 2. Android Chrome: switch video files while playing, then retrieve a frame from the new session; confirm the old session is rejected as `wrong-session`.
 3. Background/restore the tab and confirm capture and the bounded buffer resume without a burst.
 4. Rotate a narrow phone and check the timeline, retrieval panel, task panel, decision log, and benchmark cards.
+5. Perception page: enable the model on a real iPhone Safari and Android Chrome, grant/deny camera permission, run the 2 × 8 s comparison, and record load time, P50/P95, drops, thermal throttling, and battery use. These real-device checks are not available in this environment.
 
 ## Documentation
 
-Read [ARCHITECTURE.md](ARCHITECTURE.md) for contracts, bounded buffer semantics, budgets, retrieval statuses, decision boundaries, benchmark isolation, and ownership; [docs/decision-model-integration.md](docs/decision-model-integration.md) for future model adapters; [ROADMAP.md](ROADMAP.md) for phase status; and [AGENTS.md](AGENTS.md) for coding-agent handoff.
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for contracts, bounded buffer semantics, budgets, retrieval statuses, decision boundaries, benchmark isolation, and ownership; [docs/decision-model-integration.md](docs/decision-model-integration.md) for future model adapters; [docs/visual-perception.md](docs/visual-perception.md) for the Phase 4P.1 experiment; [ROADMAP.md](ROADMAP.md) for phase status; and [AGENTS.md](AGENTS.md) for coding-agent handoff.
 
 ## License
 

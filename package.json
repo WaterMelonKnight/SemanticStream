@@ -16,7 +16,9 @@
     "benchmark": "tsx src/benchmark/cli.ts && tsx src/benchmark/retrieval-cli.ts && tsx src/benchmark/task-cli.ts && npm run benchmark:runtime",
     "benchmark:phase2": "tsx src/benchmark/retrieval-cli.ts",
     "benchmark:phase3": "tsx src/benchmark/task-cli.ts",
-    "benchmark:runtime": "tsx src/benchmark/runtime-cli.ts"
+    "benchmark:runtime": "tsx src/benchmark/runtime-cli.ts",
+    "predev": "node scripts/prepare-mediapipe-wasm.mjs",
+    "prebuild": "node scripts/prepare-mediapipe-wasm.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.7",
@@ -24,5 +26,8 @@
     "typescript": "^6.0.3",
     "vite": "^8.3.8",
     "vitest": "^5.1.1"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.2.3"
   }
 }

@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <meta name="description" content="Optional local browser object detection experiment with MediaPipe EfficientDet-Lite0, bounded worker inference, and fixed vs change-triggered scheduling." />
+    <title>SemanticStream · Visual Perception Experiment</title>
+    <script type="module" src="/src/perception.ts"></script>
+  </head>
+  <body>
+    <header class="masthead">
+      <div><strong>SemanticStream</strong> <span>Phase 4P.1 · Visual perception</span></div>
+      <nav>
+        <a href="./index.html">Visual sampling demo ↗</a>
+        <a href="./runtime.html">Runtime lab ↗</a>
+      </nav>
+    </header>
+    <main>
+      <header class="intro">
+        <p class="eyebrow">Local-only experiment</p>
+        <h1>Lightweight visual perception</h1>
+        <p>Turn a live camera or local video into structured object observations with an optional MediaPipe EfficientDet-Lite0 model. Detection is off by default. Media never leaves this browser.</p>
+      </header>
+
+      <section class="panel model-gate" aria-labelledby="model-title">
+        <div class="panel-heading">
+          <div>
+            <h2 id="model-title">Object detector</h2>
+            <p class="note">EfficientDet-Lite0 int8 · MediaPipe Tasks Vision · CPU delegate · no account, no paid API, no training.</p>
+          </div>
+          <span id="model-status" class="status-pill" role="status">Model not loaded</span>
+        </div>
+        <div class="model-actions">
+          <button id="enable-model" class="primary">Enable model</button>
+          <button id="disable-model" hidden>Unload model</button>
+          <progress id="load-progress" max="4602795" value="0" hidden></progress>
+        </div>
+        <p id="model-detail" class="note"></p>
+        <p class="note small">Enabling downloads the model (~4.60 MB) from the official MediaPipe catalog and loads the self-hosted MediaPipe Wasm runtime. The first load may take longer on mobile. If the worker or WebAssembly is unavailable, the preview remains usable with detection off. See <code>docs/visual-perception-licenses.md</code> for versions, sizes, sources, and deployment limits.</p>
+      </section>
+
+      <section class="panel source-panel" aria-labelledby="source-title">
+        <div class="panel-heading">
+          <div>
+            <h2 id="source-title">Input source</h2>
+            <p class="note">Camera permission needs HTTPS or localhost. Local video stays in a browser Object URL.</p>
+          </div>
+          <span id="source-status" class="status-pill" role="status">Choose a source</span>
+        </div>
+        <div class="source-actions">
+          <button id="camera-start">Start camera</button>
+          <button id="camera-stop" hidden>Stop camera</button>
+          <label class="file-button">Local video <input id="video-file" type="file" accept="video/*" /></label>
+          <button id="video-play" hidden>Play video</button>
+          <button id="video-restart" hidden>Restart video</button>
+          <button id="demo-start">Procedural demo</button>
+        </div>
+        <div id="video-controls" class="video-controls" hidden>
+          <input id="video-seek" type="range" min="0" max="1000" step="1" value="0" aria-label="Seek local video" />
+          <span id="video-time" class="mono-note">—</span>
+        </div>
+        <video id="media" playsinline muted hidden></video>
+      </section>
+
+      <section class="perception-grid">
+        <section class="panel feed-panel" aria-labelledby="feed-title">
+          <div class="panel-heading">
+            <h2 id="feed-title">Live feed + detection boxes</h2>
+            <span id="feed-status" class="mono-note">No frames</span>
+          </div>
+          <div class="feed-wrap">
+            <canvas id="feed" width="720" height="405" role="img" aria-label="Original camera or local video feed"></canvas>
+            <canvas id="overlay" width="720" height="405" role="img" aria-label="Detected object boxes"></canvas>
+          </div>
+          <p id="detection-status" class="note" role="status">Detection off by default.</p>
+        </section>
+
+        <section class="panel settings-panel" aria-labelledby="settings-title">
+          <div class="panel-heading"><h2 id="settings-title">Detection schedule</h2></div>
+          <label class="field">Mode
+            <select id="mode">
+              <option value="fixed">Fixed frequency</option>
+              <option value="adaptive">Change-triggered + periodic</option>
+            </select>
+          </label>
+          <label class="field">Target detection FPS
+            <input id="target-fps" type="range" min="2" max="5" step="0.5" value="3" />
+            <output id="target-fps-value" for="target-fps">3 FPS</output>
+          </label>
+          <label class="field">Periodic floor (adaptive)
+            <input id="periodic-ms" type="number" min="250" max="10000" step="250" value="1500" />
+            <output id="periodic-value" for="periodic-ms">1500 ms</output>
+          </label>
+          <label class="field">Change trigger (adaptive)
+            <input id="change-threshold" type="range" min="0.5" max="15" step="0.5" value="3" />
+            <output id="change-value" for="change-threshold">3.0%</output>
+          </label>
+          <p class="note small">Frames are prepared at 320 × 320 with letterboxing, not from the 96 × 54 sampling thumbnail. Only one request is in flight; one latest pending request is kept and older pending frames are counted as dropped.</p>
+          <div class="stats-grid">
+            <div><span>Effective detection FPS</span><b id="stat-fps">0.00 fps</b></div>
+            <div><span>Batches</span><b id="stat-batches">0</b></div>
+            <div><span>Observations</span><b id="stat-observations">0</b></div>
+            <div><span>Inference P50</span><b id="stat-p50">—</b></div>
+            <div><span>Inference P95</span><b id="stat-p95">—</b></div>
+            <div><span>Queue / not ready</span><b id="stat-drops">0 / 0</b></div>
+            <div><span>Stale results</span><b id="stat-stale">0</b></div>
+            <div><span>Long tasks / max</span><b id="stat-longtasks">—</b></div>
+            <div><span>Model load</span><b id="stat-load">—</b></div>
+            <div><span>Active model</span><b id="stat-model">off</b></div>
+          </div>
+        </section>
+      </section>
+
+      <section class="panel observations-panel" aria-labelledby="observations-title">
+        <div class="panel-heading">
+          <div>
+            <h2 id="observations-title">Structured object observations</h2>
+            <p class="note">Each row is an ObjectObservation with session, frame, capture/completion times, category, score, source-pixel box, and an evidence reference. Pixels are not retained in this table.</p>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr><th>Frame</th><th>Category</th><th>Score</th><th>Box (source px)</th><th>Source</th><th>Evidence ref</th></tr>
+            </thead>
+            <tbody id="observations">
+              <tr><td colspan="6">Enable the model to start structured observations.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel benchmark-panel" aria-labelledby="benchmark-title">
+        <div class="panel-heading">
+          <div>
+            <h2 id="benchmark-title">Scheduling benchmark</h2>
+            <p class="note">Runs fixed then change-triggered + periodic detection on the current source. Local video restarts for each phase; camera and procedural phases are sequential, not the same clip. No labeled data means no accuracy or event-recall claims.</p>
+          </div>
+          <span id="benchmark-status" class="status-pill" role="status">Not run</span>
+        </div>
+        <div class="model-actions">
+          <button id="benchmark-run" class="primary">Run 2 × 8s comparison</button>
+          <button id="benchmark-cancel" disabled>Stop</button>
+        </div>
+        <div id="benchmark-results" class="benchmark-results">Run the comparison after enabling the model and starting a source.</div>
+      </section>
+
+      <section class="panel notes-panel">
+        <h2>What this experiment does and does not do</h2>
+        <ul>
+          <li>Uses a real browser-side object detector; no upload, paid API, training, or GPU requirement.</li>
+          <li>Worker inference keeps model compute off the UI thread. The page drops stale pending frames instead of growing an unbounded queue.</li>
+          <li>Completes detection at 2–5 FPS; adaptive mode combines a change probe with a periodic floor, so it does not rely only on frame diff.</li>
+          <li>Stores no whole video and no detection thumbnails. Sessions reset on source switch, video load/seek/restart, camera stop, and page exit.</li>
+          <li>Object tracking, OBJECT_APPEARED / MOVED / DISAPPEARED, and an Object State Index are future work; this page only emits stateless observations.</li>
+          <li>The reported metrics are load time, bytes, inference latency, batch/detection counts, effective FPS, dropped work, and page long tasks. No accuracy is reported without labels.</li>
+        </ul>
+        <p class="note">Read the repository's <code>docs/visual-perception.md</code> and <code>docs/visual-perception-licenses.md</code> for architecture and license/deployment notes.</p>
+      </section>
+    </main>
+  </body>
+</html>

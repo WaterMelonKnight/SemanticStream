@@ -235,10 +235,26 @@ Recall measures only whether a frame was delivered inside a defined visual event
 
 Phase 2 does not implement a whole-video archive, GPU inference, model APIs, a backend, or a semantic understanding model. The buffer is a short-lived evidence cache, not a replacement for the source. The oracle result is not evidence of autonomous event discovery.
 
-Phase 3A does not deploy a model, download weights, call a paid API, or run on a GPU. The live task decision is advisory by default and can gate sends when the task-aware strategy is selected; the benchmark is the full execution proof for sends and retrieval actions. Task ROI is a declared user input, not a label. The decision heuristic can lose to the baselines; the held-out report shows both wins and misses. The live page only gates sends when the task-aware strategy is selected; retrieval actions remain benchmark-only. Later work may add opt-in sources, asynchronous sinks, a real adapter, calibrated probabilities, and broader resource policies.
+Phase 3A does not deploy a model, download weights, call a paid API, or run on a GPU. Phase 4P.1 is an isolated opt-in browser experiment with no accuracy claim and no production model API; it does not alter the Phase 3A decision path. The live task decision is advisory by default and can gate sends when the task-aware strategy is selected; the benchmark is the full execution proof for sends and retrieval actions. Task ROI is a declared user input, not a label. The decision heuristic can lose to the baselines; the held-out report shows both wins and misses. The live page only gates sends when the task-aware strategy is selected; retrieval actions remain benchmark-only. Later work may add opt-in sources, asynchronous sinks, a real adapter, calibrated probabilities, and broader resource policies.
 
 ## Phase 4A · Duplex inference
 
 The independent Live Vision Runtime Lab connects Phase 3R's admitted evidence to a DOM-free inference scheduler. The browser retains source ownership. Overlapping requests use one scripted endpoint, immutable snapshots, one writer per output channel, and terminal-evidence-based release of physical capacity. Each visual source reset invalidates the inference session while preserving slots still in flight. The original visual comparison and its historical benchmarks remain available.
 
 See [Phase 4A runtime architecture](docs/phase4a-duplex-runtime.md) for task, output, usage and browser-source contracts.
+
+## Phase 4P.1 · Lightweight visual perception
+
+`perception.html` is an independent experiment. It reuses `CameraSource`, `VideoSource`, and `ProceduralSource` but does not change the Phase 4A scheduler, the `DecisionProvider` boundary, or the runtime lab. The model is **off by default** and the user must explicitly enable it.
+
+The `ObjectDetectorProvider` boundary in `src/perception/provider.ts` exposes `load`, `detect`, and `dispose`. The first implementation is MediaPipe Tasks Vision with EfficientDet-Lite0 int8 in a module Web Worker. A future ONNX Runtime Web/YOLOX provider can implement the same contract.
+
+- Input is 320 × 320 letterboxed in a dedicated Canvas; the existing 96 × 54 sampling thumbnail is not the detector input.
+- The main thread keeps one in-flight request and one latest pending request. A replacement increments the queue-drop count. There is no unbounded frame queue.
+- `DetectionTrigger` uses a fixed interval or an adaptive change probe plus a periodic floor, both clamped to 2–5 FPS.
+- Detector boxes are mapped from the model input back to 720 × 405 source pixels. `ObjectObservation` carries session/frame/time/category/score/source-box/evidence/transform.
+- Source switch, video load/seek/restart, camera stop, model unload, worker failure, and page exit invalidate the session. Results are accepted only when both request ID and session ID match.
+- The worker is terminated on unload and non-bfcache exit. Model load failure keeps the source preview usable and exposes a retry.
+- The live comparison runs 8 s fixed + 8 s adaptive and reports load time, model bytes, P50/P95 inference, batches, effective FPS, queue/stale drops, long tasks, and elapsed time. It does not report accuracy because no labeled dataset exists.
+
+The self-hosted Wasm assets are copied from `node_modules` by `scripts/prepare-mediapipe-wasm.mjs` on `predev`/`prebuild`; the model is downloaded only after user opt-in. Runtime/model versions, sizes, license status, CSP and deployment limits are in [visual-perception-licenses.md](docs/visual-perception-licenses.md). Architecture, lifecycle and future tracking/state-index design are in [visual-perception.md](docs/visual-perception.md). Observed single-run numbers and real-device gaps are in [visual-perception-results.md](docs/visual-perception-results.md).

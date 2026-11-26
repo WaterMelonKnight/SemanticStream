@@ -98,3 +98,6 @@ temp/
 
 # Fresh Phase 1B timings, separate from the historical tracked report.
 /benchmarks/results/phase1b-replay.*
+
+# Self-hosted MediaPipe runtime assets copied from node_modules by predev/prebuild.
+/public/mediapipe/
