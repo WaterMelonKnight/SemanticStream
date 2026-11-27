@@ -2,7 +2,7 @@
 
 ## Scope
 
-SemanticStream is adaptive context streaming infrastructure for real-time AI agents. Phase 0 is a browser-only visual loop with a procedural source and a mock receiver. Phase 1A adds a local video source behind the same stream contract. Phase 1B adds block-local and hybrid adaptive policies plus a deterministic budget-aware replay benchmark. Phase 2 adds a bounded context buffer, active retrieval, and a separate/combined resource budget. Phase 3A adds a typed task-aware decision boundary and unified ex-ante admission for adaptive real-time sends plus retrieval. Phase 4P.1 adds an isolated, opt-in browser perception experiment. Phase 4O adds bounded runtime telemetry and a gateway cost dashboard. Keep changes scoped to the current phase or the requested task.
+SemanticStream is adaptive context streaming infrastructure for real-time AI agents. Phase 0 is a browser-only visual loop with a procedural source and a mock receiver. Phase 1A adds a local video source behind the same stream contract. Phase 1B adds block-local and hybrid adaptive policies plus a deterministic budget-aware replay benchmark. Phase 2 adds a bounded context buffer, active retrieval, and a separate/combined resource budget. Phase 3A adds a typed task-aware decision boundary and unified ex-ante admission for adaptive real-time sends plus retrieval. Phase 4P.1 adds an isolated, opt-in browser perception experiment; Phase 4P.2 adds bounded object tracking, a state index and semantic events. Phase 4O adds bounded runtime telemetry and a gateway cost dashboard. Keep changes scoped to the current phase or the requested task.
 
 ## Entry points
 

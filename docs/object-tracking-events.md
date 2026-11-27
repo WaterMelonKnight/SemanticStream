@@ -163,3 +163,33 @@ A future Phase 4I adapter can convert `OBJECT_APPEARED`/`OBJECT_MOVED`/`OBJECT_T
 - No real-image evidence cache is shared between Perception Lab and Runtime Lab.
 - Synthetic benchmark accuracy is not real model accuracy.
 - Real-device long-run thermal/battery behavior remains separate from this functional phase.
+
+
+## Benchmark snapshot (synthetic)
+
+Latest deterministic run (`npm run benchmark:tracking`):
+
+| Fixture | ID switches | Assoc. correct | Event type P/R | First event | Processing ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| moving-object | 0 | 10/10 | 1.000 / 1.000 | 250 ms | ~2–3 |
+| stationary-jitter | 0 | 14/14 | 1.000 / 1.000 | 250 ms | <1 |
+| crossing-same-category | 0 | 10/10 | 0.667 / 1.000 | 250 ms | ~20 |
+| short-occlusion | 0 | 3/3 | 0.750 / 1.000 | 250 ms | <1 |
+| expiry-gap | 0 | 2/2 | 1.000 / 1.000 | 250 ms | <1 |
+| low-confidence | 0 | 0/0 | 1.000 / 1.000 | — | <1 |
+| irregular-intervals | 0 | 5/5 | 0.750 / 1.000 | 500 ms | <1 |
+| skipped-vs-empty | 0 | 2/2 | 1.000 / 1.000 | 250 ms | <1 |
+| session-switch | 0 | 4/4 | 1.000 / 1.000 | 250 ms | <1 |
+| camera-pan-ambiguity | 0 | 8/8 | 1.000 / 1.000 | 300 ms | <1 |
+
+Processing time is wall-clock and varies. Crossing/camera-pan fixtures are deliberately ambiguous and are not identity-accuracy claims.
+
+## Real-device observation
+
+Preview `https://f6f000f0.semanticstream.pages.dev` on a Redmi 22081212C / Android 14 / Xiaomi Browser 135.0.7049.79:
+
+- Stable tracks for a static scene: two active tracks retained 220+ observations with stable IDs.
+- Real image-space events observed: `OBJECT_APPEARED`, `OBJECT_MOVED` (`image-coordinate-only`), `OBJECT_STATIONARY`, `OBJECT_TEMPORARILY_LOST`, `OBJECT_EXPIRED`.
+- The ad-hoc hand-occlusion attempt produced temporary loss/expiry but did **not** produce a confirmed `OBJECT_REAPPEARED`; reliable real-device reappearance remains **NOT_TESTED**.
+- Object-index JSON export produced a bounded 24.2 KB snapshot. Tracking processing P50/P95 was ~0.1 ms and event processing ~0.0/0.1 ms on this device.
+- Backgrounding released the camera and required manual restart. The page reported long tasks from the existing inference/UI workload; tracking processing itself was sub-millisecond. No thermal/power measurement is claimed.
