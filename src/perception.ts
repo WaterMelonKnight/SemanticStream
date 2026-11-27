@@ -16,6 +16,9 @@ import { DetectionTrigger } from './perception/scheduler';
 import { isCurrentDetectionResult } from './perception/session';
 import { TelemetryHub } from './observability/telemetry';
 import type { TelemetryEvent, TelemetrySource } from './observability/types';
+import { ObjectTrackingSystem } from './perception/tracking/system';
+import type { TrackingProcessingResult } from './perception/tracking/system';
+import type { ObjectEvent, TrackedObject } from './perception/tracking/types';
 import {
   DETECTOR_ID,
   EFFICIENTDET_MODEL_BYTES,
@@ -135,6 +138,17 @@ const triggerStat = element('stat-triggers');
 const visibilityStat = element('stat-visibility');
 const pageStateStat = element('stat-state');
 const longTaskRateStat = element('stat-longtask-rate');
+const trackingEnabledInput = element<HTMLInputElement>('tracking-enabled');
+const trackingStatus = element('tracking-status');
+const trackingActive = element('tracking-active');
+const trackingTentative = element('tracking-tentative');
+const trackingLost = element('tracking-lost');
+const trackingExpired = element('tracking-expired');
+const trackingEventCount = element('tracking-event-count');
+const trackingMetrics = element('tracking-metrics');
+const objectEvents = element('object-events');
+const objectHistory = element('object-history');
+const objectIndexJson = element('object-index-json');
 const observationBody = element<HTMLTableSectionElement>('observations');
 const detectionStatus = element('detection-status');
 const telemetryStatus = element('perception-telemetry-status');
@@ -183,6 +197,13 @@ let benchmarkPhases: BenchmarkPhase[] = [];
 let foreground = !document.hidden;
 let cameraStartVersion = 0;
 let statsTimer: number | undefined;
+let tracking: ObjectTrackingSystem | undefined;
+let latestTracks: readonly TrackedObject[] = [];
+let latestDetectionBatch: readonly ObjectObservation[] = [];
+const trackIdByEvidence = new Map<string, string>();
+let selectedTrackId = '';
+let lastTrackingTelemetryAt = 0;
+let lastTrackingRenderAt = 0;
 
 const metrics = new PerceptionMetrics(performance.now(), foreground);
 const telemetry = new TelemetryHub(320, 120);
@@ -273,6 +294,7 @@ function invalidateSession(): void {
   if (sessionId) telemetry.event(systemClockNow(), 'perception', 'session_invalidated', telemetrySource(), { sessionId });
   sessionVersion += 1;
   sessionId = '';
+  resetTracking();
   pending = null;
   observations = [];
   lastProbe = null;
@@ -354,9 +376,173 @@ function download(name: string, text: string, type: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+
+function trackingEnabled(): boolean {
+  return trackingEnabledInput.checked;
+}
+
+function resetTracking(): void {
+  tracking = undefined;
+  latestTracks = [];
+  selectedTrackId = '';
+  lastTrackingTelemetryAt = 0;
+  lastTrackingRenderAt = 0;
+  trackIdByEvidence.clear();
+  renderObjectTracking();
+}
+
+function startTracking(): void {
+  if (!trackingEnabled() || !sessionId) {
+    resetTracking();
+    return;
+  }
+  tracking = new ObjectTrackingSystem(sessionId);
+  latestTracks = [];
+  selectedTrackId = '';
+  lastTrackingTelemetryAt = 0;
+  lastTrackingRenderAt = 0;
+  trackIdByEvidence.clear();
+  renderObjectTracking();
+}
+
+function trackForObservation(observation: ObjectObservation): TrackedObject | undefined {
+  return latestTracks.find((track) => track.evidenceRef === observation.evidence.frameRef
+    && track.categoryId === observation.categoryId)
+    ?? (trackIdByEvidence.has(observation.evidence.frameRef)
+      ? tracking?.getObjectById(trackIdByEvidence.get(observation.evidence.frameRef) ?? '')
+      : undefined);
+}
+
+function formatTrackEvent(event: ObjectEvent): string {
+  return `t+${(event.observedAtMs / 1_000).toFixed(2)}s · ${event.eventType} · ${event.trackId}`
+    + ` · ${event.categoryName} · ${event.reason} · ${event.certainty}`;
+}
+
+function renderObjectTracking(): void {
+  const enabled = trackingEnabled();
+  const diagnostic = tracking?.diagnostics();
+  if (!enabled) {
+    trackingStatus.textContent = 'Disabled';
+    trackingStatus.dataset.state = 'idle';
+    trackingActive.textContent = '0';
+    trackingTentative.textContent = '0';
+    trackingLost.textContent = '0';
+    trackingExpired.textContent = '0';
+    trackingEventCount.textContent = '0';
+    trackingMetrics.replaceChildren();
+    objectEvents.replaceChildren();
+    objectHistory.replaceChildren();
+    objectIndexJson.textContent = '{}';
+    return;
+  }
+  if (!tracking) {
+    trackingStatus.textContent = sessionId ? 'Idle · no detection yet' : 'Idle · no session';
+    trackingStatus.dataset.state = 'idle';
+    trackingActive.textContent = '0';
+    trackingTentative.textContent = '0';
+    trackingLost.textContent = '0';
+    trackingExpired.textContent = '0';
+    trackingEventCount.textContent = '0';
+    trackingMetrics.replaceChildren();
+    objectEvents.replaceChildren();
+    objectHistory.replaceChildren();
+    objectIndexJson.textContent = '{}';
+    return;
+  }
+  const snapshot = tracking.snapshot();
+  trackingStatus.textContent = sessionId ? `Session · ${sessionId}` : 'Idle';
+  trackingStatus.dataset.state = snapshot.activeCount > 0 ? 'ok' : 'idle';
+  trackingActive.textContent = String(snapshot.activeCount);
+  trackingTentative.textContent = String(snapshot.tentativeCount);
+  trackingLost.textContent = String(snapshot.lostCount);
+  trackingExpired.textContent = String(snapshot.expiredCount);
+  trackingEventCount.textContent = String(snapshot.eventLogSize);
+  const metrics = [
+    `processing · P50 ${formatMs(diagnostic?.processingP50Ms ?? null)} · P95 ${formatMs(diagnostic?.processingP95Ms ?? null)}`,
+    `events · P50 ${formatMs(diagnostic?.eventP50Ms ?? null)} · P95 ${formatMs(diagnostic?.eventP95Ms ?? null)}`,
+    `index · ${snapshot.indexEntries} entries · ${snapshot.indexEvictions} evictions · ${diagnostic?.associationFailures ?? 0} association failures`,
+    `event log · ${snapshot.eventLogSize}/${snapshot.eventLogSize + snapshot.eventSuppressed} shown · ${snapshot.eventSuppressed} suppressed`,
+    `input · ${diagnostic?.inputBatches ?? 0} batches · ${diagnostic?.inputDetections ?? 0} detections · ${diagnostic?.outputEvents ?? 0} events`,
+    `counts · ${Object.entries(snapshot.eventCounts).filter(([, count]) => count > 0).map(([type, count]) => `${type} ${count}`).join(' · ') || '—'}`,
+  ];
+  trackingMetrics.replaceChildren(...metrics.map((text) => {
+    const item = document.createElement('li'); item.textContent = text; return item;
+  }));
+  const recent = snapshot.events.slice(-12).reverse();
+  objectEvents.replaceChildren(...(recent.length ? recent.map((event) => {
+    const item = document.createElement('li'); item.textContent = formatTrackEvent(event); return item;
+  }) : [listItem('No semantic events yet.')]));
+
+  if (!selectedTrackId) {
+    objectHistory.replaceChildren(listItem('Select a track row to inspect its bounded history and evidence status.'));
+  } else {
+    const track = tracking.getObjectById(selectedTrackId);
+    if (!track) {
+      selectedTrackId = '';
+      objectHistory.replaceChildren(listItem('Selected track is no longer in the bounded index.'));
+    } else {
+      const history = tracking.getObjectHistory(track.trackId).slice(-12).reverse();
+      const evidence = tracking.getObjectEvidence(track.trackId, track.lastObservationAtMs);
+      const rows = [
+        `selected · ${track.trackId} · ${track.categoryName} · ${track.trackingState} · confidence ${track.confidence.toFixed(3)}`,
+        `first/last · ${formatDuration(track.firstSeenAtMs)} / ${formatDuration(track.lastSeenAtMs)} · observations ${track.observationCount}`,
+        `evidence · ${evidence.status} · ${evidence.message}`,
+        ...history.map((point) => `history · ${formatDuration(point.atMs)} · ${point.trackingState}`
+          + ` · ${point.boundingBox.x.toFixed(3)},${point.boundingBox.y.toFixed(3)}`
+          + ` · confidence ${point.confidence.toFixed(3)}`),
+      ];
+      objectHistory.replaceChildren(...rows.map((text) => listItem(text)));
+    }
+  }
+  if (objectIndexJson.closest('details')?.open) {
+    objectIndexJson.textContent = JSON.stringify(snapshot, null, 2);
+  }
+}
+
+function listItem(text: string): HTMLLIElement {
+  const item = document.createElement('li');
+  item.textContent = text;
+  return item;
+}
+
+function recordTrackingTelemetry(result: TrackingProcessingResult): void {
+  if (!tracking) return;
+  const now = systemClockNow();
+  const identity = sessionId ? { sessionId } : {};
+  telemetry.histogram(now, 'tracking', 'processing_ms', result.trackingMs, 'ms', 'real', identity);
+  telemetry.histogram(now, 'events', 'processing_ms', result.eventMs, 'ms', 'real', identity);
+  for (const event of result.events) {
+    telemetry.counter(now, 'events', 'event_' + event.eventType, 1, 'real', identity);
+  }
+  if (now - lastTrackingTelemetryAt < 1_000) return;
+  lastTrackingTelemetryAt = now;
+  const diagnostic = tracking.diagnostics();
+  const snapshot = tracking.snapshot();
+  telemetry.gauge(now, 'tracking', 'active_tracks', snapshot.activeCount, 'tracks', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'tentative_tracks', snapshot.tentativeCount, 'tracks', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'lost_tracks', snapshot.lostCount, 'tracks', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'expired_tracks', snapshot.expiredCount, 'tracks', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'index_entries', snapshot.indexEntries, 'objects', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'index_evictions', snapshot.indexEvictions, 'evictions', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'association_failures', diagnostic.associationFailures, 'failures', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'input_batches', diagnostic.inputBatches, 'batches', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'input_detections', diagnostic.inputDetections, 'detections', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'output_events', diagnostic.outputEvents, 'events', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'event_suppressed', snapshot.eventSuppressed, 'events', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'event_log_size', snapshot.eventLogSize, 'events', 'real', identity);
+  if (diagnostic.processingP50Ms !== null) telemetry.gauge(now, 'tracking', 'processing_p50_ms', diagnostic.processingP50Ms, 'ms', 'real', identity);
+  if (diagnostic.processingP95Ms !== null) telemetry.gauge(now, 'tracking', 'processing_p95_ms', diagnostic.processingP95Ms, 'ms', 'real', identity);
+  if (diagnostic.eventP50Ms !== null) telemetry.gauge(now, 'events', 'processing_p50_ms', diagnostic.eventP50Ms, 'ms', 'real', identity);
+  if (diagnostic.eventP95Ms !== null) telemetry.gauge(now, 'events', 'processing_p95_ms', diagnostic.eventP95Ms, 'ms', 'real', identity);
+  for (const [type, count] of Object.entries(snapshot.eventCounts)) {
+    telemetry.gauge(now, 'events', 'count_' + type, count, 'events', 'real', identity);
+  }
+}
+
 function beginSession(kind: SourceKind): void {
   sessionVersion += 1;
   sessionId = `perception-${kind}-${sessionVersion}`;
+  startTracking();
   pending = null;
   observations = [];
   lastProbe = null;
@@ -485,6 +671,40 @@ function handleDetection(result: DetectionResponse): void {
   telemetry.histogram(completedAtMs, 'perception', 'inference_ms', result.inferenceMs, 'ms', 'real', { sessionId });
   telemetry.counter(completedAtMs, 'perception', 'detection_batch', 1, 'real', { sessionId });
   if (batch.length) telemetry.counter(completedAtMs, 'perception', 'observations', batch.length, 'real', { sessionId });
+  latestDetectionBatch = batch;
+  if (trackingEnabled() && tracking) {
+    try {
+      const trackingResult = tracking.process({
+        sessionId,
+        observedAtMs: completedAtMs,
+        frameSequence: result.frameSequence,
+        frameWidth: FEED_WIDTH,
+        frameHeight: FEED_HEIGHT,
+        status: 'ok',
+        detections: batch,
+      });
+      latestTracks = trackingResult.frame.tracks;
+      for (const track of [...trackingResult.frame.tracks, ...trackingResult.frame.expired]) {
+        trackIdByEvidence.set(track.evidenceRef, track.trackId);
+      }
+      while (trackIdByEvidence.size > 300) {
+        const oldest = trackIdByEvidence.keys().next().value;
+        if (oldest === undefined) break;
+        trackIdByEvidence.delete(oldest);
+      }
+      recordTrackingTelemetry(trackingResult);
+      const now = systemClockNow();
+      if (trackingResult.events.length > 0 || now - lastTrackingRenderAt >= 250) {
+        lastTrackingRenderAt = now;
+        renderObjectTracking();
+      }
+    } catch {
+      trackingStatus.textContent = 'Tracking unavailable';
+      trackingStatus.dataset.state = 'error';
+    }
+  } else {
+    latestTracks = [];
+  }
   drawObservations(batch);
   renderObservations();
   renderStats();
@@ -514,16 +734,40 @@ function handleDetectionError(): void {
   setDetectionStatus('Detection stopped after a worker error. The source preview is still live.', 'error');
 }
 
+function selectTrack(trackId: string): void {
+  selectedTrackId = trackId;
+  renderObjectTracking();
+  drawObservations(latestDetectionBatch);
+}
+
+function drawTrackTrail(): void {
+  if (!overlayContext || !tracking || !selectedTrackId) return;
+  const history = tracking.getObjectHistory(selectedTrackId).slice(-24);
+  if (history.length < 2) return;
+  overlayContext.beginPath();
+  for (let index = 0; index < history.length; index += 1) {
+    const point = history[index].boundingBox;
+    const x = (point.x + point.width / 2) * feed.width;
+    const y = (point.y + point.height / 2) * feed.height;
+    if (index === 0) overlayContext.moveTo(x, y); else overlayContext.lineTo(x, y);
+  }
+  overlayContext.strokeStyle = 'rgba(126, 231, 135, 0.7)';
+  overlayContext.lineWidth = 2;
+  overlayContext.stroke();
+}
+
 function drawObservations(items: readonly ObjectObservation[]): void {
   if (!overlayContext) return;
   overlayContext.clearRect(0, 0, overlay.width, overlay.height);
   for (const observation of items) {
     const { box } = observation;
     if (box.width < 1 || box.height < 1) continue;
-    overlayContext.strokeStyle = '#7ee787';
+    const track = trackForObservation(observation);
+    overlayContext.strokeStyle = track?.trackingState === 'TENTATIVE' ? '#f6c85f' : '#7ee787';
     overlayContext.lineWidth = 2;
     overlayContext.strokeRect(box.x, box.y, box.width, box.height);
-    const label = `${observation.categoryName} ${formatPercent(observation.score * 100)}`;
+    const trackLabel = track ? track.trackId : 'untracked';
+    const label = `${observation.categoryName} ${formatPercent(observation.score * 100)} · ${trackLabel}`;
     overlayContext.font = '600 12px ui-monospace, SFMono-Regular, Menlo, monospace';
     const width = overlayContext.measureText(label).width + 8;
     overlayContext.fillStyle = 'rgba(10, 14, 22, 0.86)';
@@ -531,6 +775,7 @@ function drawObservations(items: readonly ObjectObservation[]): void {
     overlayContext.fillStyle = '#b7ffcb';
     overlayContext.fillText(label, box.x + 4, Math.max(11, box.y - 6));
   }
+  drawTrackTrail();
 }
 
 function renderObservations(): void {
@@ -538,7 +783,7 @@ function renderObservations(): void {
   if (!observations.length) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
-    cell.colSpan = 6;
+    cell.colSpan = 8;
     cell.textContent = modelReady ? 'No observations yet.' : 'Enable the model to start structured observations.';
     row.append(cell);
     observationBody.append(row);
@@ -546,8 +791,11 @@ function renderObservations(): void {
   }
   for (const observation of observations) {
     const row = document.createElement('tr');
+    const track = trackForObservation(observation);
     const values = [
       `#${String(observation.frameSequence).padStart(4, '0')}`,
+      track?.trackId ?? '—',
+      track?.trackingState ?? '—',
       observation.categoryName,
       observation.score.toFixed(3),
       `${Math.round(observation.box.x)},${Math.round(observation.box.y)} ${Math.round(observation.box.width)}×${Math.round(observation.box.height)}`,
@@ -558,6 +806,11 @@ function renderObservations(): void {
       const cell = document.createElement('td');
       cell.textContent = value;
       row.append(cell);
+    }
+    if (track) {
+      row.classList.add('track-row');
+      row.tabIndex = 0;
+      row.addEventListener('click', () => selectTrack(track.trackId));
     }
     observationBody.append(row);
   }
@@ -940,6 +1193,19 @@ changeInput.addEventListener('input', updateSettings);
 element('perception-telemetry-json').addEventListener('click', () => download('perception-telemetry.json', telemetry.exportJson(), 'application/json'));
 element('perception-telemetry-csv').addEventListener('click', () => download('perception-telemetry.csv', telemetry.exportCsv(), 'text/csv'));
 element('perception-telemetry-clear').addEventListener('click', () => { telemetry.clear(); renderPerceptionTelemetry(); });
+trackingEnabledInput.addEventListener('change', () => {
+  if (trackingEnabled()) startTracking(); else resetTracking();
+  drawObservations(latestDetectionBatch);
+});
+element('object-index-export').addEventListener('click', () => {
+  if (!tracking) return;
+  download('perception-object-index.json', JSON.stringify(tracking.snapshot(), null, 2), 'application/json');
+});
+element('object-index-clear').addEventListener('click', () => {
+  selectedTrackId = '';
+  renderObjectTracking();
+  drawObservations(latestDetectionBatch);
+});
 benchmarkRun.addEventListener('click', () => void runBenchmark());
 benchmarkCancel.addEventListener('click', () => { benchmarkAbort = true; });
 

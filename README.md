@@ -2,7 +2,7 @@
 
 **Less data. More understanding.**
 
-SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 added a bounded history buffer and active retrieval. Phase 3A adds a task-aware, pluggable decision boundary. Phase 3R hardens session lifetimes, resource admission and replay while keeping the browser demo local. Phase 4P.1 adds an opt-in lightweight visual-perception experiment. Phase 4O adds a bounded runtime observability protocol and a gateway cost dashboard. See the [Phase 3R audit](docs/architecture-audit-phase3r.md) and [runtime architecture](docs/runtime-architecture-v2.md).
+SemanticStream is adaptive context streaming infrastructure for real-time AI agents. It selects context from a continuous stream under constrained bandwidth and compute. Phase 0 built a procedural visual loop. Phase 1A added local video. Phase 1B added deterministic budget-aware event evaluation. Phase 2 added a bounded history buffer and active retrieval. Phase 3A adds a task-aware, pluggable decision boundary. Phase 3R hardens session lifetimes, resource admission and replay while keeping the browser demo local. Phase 4P.1 adds an opt-in lightweight visual-perception experiment. Phase 4O adds a bounded runtime observability protocol and a gateway cost dashboard. Phase 4P.2 adds deterministic object tracking, a bounded object state index and semantic perception events. See the [Phase 3R audit](docs/architecture-audit-phase3r.md) and [runtime architecture](docs/runtime-architecture-v2.md).
 
 The static demo runs locally in the browser and the benchmarks run in Node.js. Selected videos are read through local Object URLs. Phase 4A+1 adds an opt-in, text-only streaming gateway. Media stays local in both modes.
 
@@ -53,6 +53,14 @@ Open `/perception.html` for an independent experiment that turns a camera or loc
 - The live benchmark compares fixed vs adaptive scheduling for 2 × 8 s and reports load time, bytes, P50/P95 inference, batches, effective FPS, drops, stale results, and long tasks. It reports **no accuracy** because there is no labeled dataset.
 
 The model/runtime licenses, exact versions, sizes, sources, CSP and deployment limits are in [docs/visual-perception-licenses.md](docs/visual-perception-licenses.md). Architecture, lifecycle, metrics definitions, and the future tracking/Object State Index design are in [docs/visual-perception.md](docs/visual-perception.md). Observed one-run browser numbers and device gaps are in [docs/visual-perception-results.md](docs/visual-perception-results.md).
+
+## Object tracking and semantic events (Phase 4P.2)
+
+The Perception Lab now has an opt-in **Track objects & semantic events** mode. It adds stable page/session track IDs, track states, bounded object history, a semantic event timeline, selected-object evidence status, and an exportable object-index JSON view. Tracking is deterministic tracking-by-detection (IoU + normalized center distance + time gate); it is image-coordinate-only, has no camera-motion compensation, and does not claim ReID or long-term identity.
+
+Only valid detection batches can age or expire tracks. Skipped/failed detection batches cannot make an object disappear. The state index and event log are bounded and session-scoped; no image cache is shared between Perception Lab and Runtime Lab, so evidence is explicitly unavailable unless a future resolver is attached.
+
+Run the deterministic synthetic benchmark with `npm run benchmark:tracking`. See [object tracking and semantic events](docs/object-tracking-events.md) for the state machine, event rules, Phase 4I contracts and limitations.
 
 ## Runtime observability and cost dashboard (Phase 4O)
 

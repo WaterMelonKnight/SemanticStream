@@ -194,3 +194,21 @@ code { color: #ddd6fe; font-family: var(--mono); font-size: 11px; }
 .telemetry-panel .data-list li { padding: 5px 0; border-top: 1px solid #243147; overflow-wrap: anywhere; }
 .telemetry-panel .telemetry-events { max-height: 190px; overflow: auto; }
 @media (max-width: 620px) { .telemetry-panel .data-list { font-size: 10px; } }
+
+.tracking-toggle { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; color: #dbe6f5; font: 12px var(--mono); }
+.tracking-toggle input { accent-color: var(--accent); }
+.tracking-counts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; margin: 10px 0; }
+.tracking-counts div { min-width: 0; padding: 8px; border: 1px solid #253147; border-radius: 8px; background: #0c121d; }
+.tracking-counts span { display: block; color: var(--muted); font-size: 10px; }
+.tracking-counts b { display: block; margin-top: 3px; color: #b7ffcb; font: 12px var(--mono); }
+.tracking-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
+.tracking-columns h3 { margin: 0 0 6px; color: #dbe6f5; font-size: 12px; }
+.tracking-events { max-height: 230px; overflow: auto; }
+.tracking-panel .data-list { list-style: none; margin: 0; padding: 0; color: var(--muted); font: 11px/1.5 var(--mono); }
+.tracking-panel .data-list li { padding: 4px 0; border-top: 1px solid #243147; overflow-wrap: anywhere; }
+.index-json { margin-top: 10px; color: var(--muted); font: 11px var(--mono); }
+.index-json pre { max-height: 220px; overflow: auto; padding: 10px; border: 1px solid #253147; border-radius: 8px; background: #080c13; color: #dbe6f5; }
+@media (max-width: 620px) {
+  .tracking-counts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .tracking-columns { grid-template-columns: 1fr; }
+}

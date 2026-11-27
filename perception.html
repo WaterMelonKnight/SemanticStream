@@ -97,6 +97,8 @@
             <output id="change-value" for="change-threshold">3.0%</output>
           </label>
           <p class="note small">Frames are prepared at 320 × 320 with letterboxing, not from the 96 × 54 sampling thumbnail. Only one request is in flight; one latest pending request is kept and older pending frames are counted as dropped. Page state compares 5 s input vs detection and queue wait; inference P50/P95 are shown separately.</p>
+          <label class="tracking-toggle"><input id="tracking-enabled" type="checkbox" checked /> Track objects &amp; semantic events</label>
+          <p id="tracking-toggle-note" class="note small">Tracking is deterministic, image-coordinate only, and bounded. No camera-motion compensation; <code>OBJECT_EXPIRED</code> is not a physical-removal claim.</p>
           <div class="stats-grid">
             <div><span>Effective detection FPS</span><b id="stat-fps">0.00 fps</b></div>
             <div><span>Last 5 s detection FPS</span><b id="stat-fps-5s">0.00 fps</b></div>
@@ -130,13 +132,49 @@
         <div class="table-scroll">
           <table class="data-table">
             <thead>
-              <tr><th>Frame</th><th>Category</th><th>Score</th><th>Box (source px)</th><th>Source</th><th>Evidence ref</th></tr>
+              <tr><th>Frame</th><th>Track ID</th><th>State</th><th>Category</th><th>Score</th><th>Box (source px)</th><th>Source</th><th>Evidence ref</th></tr>
             </thead>
             <tbody id="observations">
-              <tr><td colspan="6">Enable the model to start structured observations.</td></tr>
+              <tr><td colspan="8">Enable the model to start structured observations.</td></tr>
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section class="panel tracking-panel" id="object-tracking" aria-labelledby="tracking-title">
+        <div class="panel-heading">
+          <div>
+            <h2 id="tracking-title">Object state index &amp; semantic events</h2>
+            <p class="note">Bounded, session-scoped tracking-by-detection. Only valid detection batches can imply absence. Events describe image-space change; no camera-motion compensation or long-term identity is claimed. Evidence images are unavailable unless a shared image cache is attached.</p>
+          </div>
+          <span id="tracking-status" class="status-pill" role="status">Idle</span>
+        </div>
+        <div class="tracking-counts">
+          <div><span>Active</span><b id="tracking-active">0</b></div>
+          <div><span>Tentative</span><b id="tracking-tentative">0</b></div>
+          <div><span>Lost</span><b id="tracking-lost">0</b></div>
+          <div><span>Expired</span><b id="tracking-expired">0</b></div>
+          <div><span>Events</span><b id="tracking-event-count">0</b></div>
+        </div>
+        <ul id="tracking-metrics" class="data-list"></ul>
+        <div class="tracking-columns">
+          <div>
+            <h3>Event timeline</h3>
+            <ul id="object-events" class="data-list tracking-events"></ul>
+          </div>
+          <div>
+            <h3>Selected object history</h3>
+            <ul id="object-history" class="data-list"></ul>
+          </div>
+        </div>
+        <div class="model-actions">
+          <button id="object-index-export" type="button">Export object index JSON</button>
+          <button id="object-index-clear" type="button">Clear selection</button>
+        </div>
+        <details class="index-json">
+          <summary>Object index JSON</summary>
+          <pre id="object-index-json">{}</pre>
+        </details>
       </section>
 
       <section class="panel benchmark-panel" aria-labelledby="benchmark-title">

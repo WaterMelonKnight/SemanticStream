@@ -1,0 +1,139 @@
+import type { EvidenceResolver, ObjectStateReader, SemanticEventSource } from './contracts';
+import { ObjectEventEngine, type ObjectEventEngineConfig } from './events';
+import { ObjectStateIndex, type ObjectStateIndexConfig } from './state-index';
+import { ObjectTracker } from './tracker';
+import {
+  type DetectionBatch,
+  type EventFilter,
+  type EvidenceResolution,
+  type HistoryRange,
+  type ObjectEvent,
+  type ObjectRegion,
+  type ObjectStateSnapshot,
+  type TrackedObject,
+  type TrackFilter,
+  type TrackHistoryPoint,
+  type TrackingConfig,
+  type TrackingFrameResult,
+  type TrackingSystemSnapshot,
+} from './types';
+
+export interface ObjectTrackingSystemConfig {
+  readonly tracker?: Partial<TrackingConfig>;
+  readonly events?: Partial<ObjectEventEngineConfig>;
+  readonly index?: Partial<ObjectStateIndexConfig>;
+  readonly evidenceResolver?: EvidenceResolver;
+}
+
+export interface TrackingProcessingResult {
+  readonly frame: TrackingFrameResult;
+  readonly events: readonly ObjectEvent[];
+  readonly suppressedEvents: number;
+  readonly trackingMs: number;
+  readonly eventMs: number;
+}
+
+function percentile(values: readonly number[], fraction: number): number | null {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * fraction) - 1)];
+}
+
+/** Page-scoped facade used by Perception Lab and the Phase 4I read contracts. */
+export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSource {
+  private readonly tracker: ObjectTracker;
+  private readonly engine: ObjectEventEngine;
+  private readonly index: ObjectStateIndex;
+  private readonly listeners = new Set<(event: ObjectEvent) => void>();
+  private readonly processingSamples: number[] = [];
+  private readonly eventSamples: number[] = [];
+  private inputBatches = 0;
+  private inputDetections = 0;
+  private outputEvents = 0;
+  private lastStatus = 'idle';
+
+  constructor(sessionId: string, config: ObjectTrackingSystemConfig = {}) {
+    this.tracker = new ObjectTracker(config.tracker);
+    this.engine = new ObjectEventEngine(config.events);
+    this.index = new ObjectStateIndex(sessionId, {
+      ...config.index,
+      evidenceResolver: config.evidenceResolver ?? config.index?.evidenceResolver,
+    });
+    this.tracker.reset(sessionId);
+    this.engine.reset(sessionId);
+    this.index.reset(sessionId);
+  }
+
+  get sessionId(): string { return this.index.currentSessionId; }
+  get activeTracks(): readonly TrackedObject[] { return this.index.getTrackedObjects(); }
+  get events(): readonly ObjectEvent[] { return this.index.getObjectEvents(); }
+
+  reset(sessionId: string): void {
+    this.tracker.reset(sessionId);
+    this.engine.reset(sessionId);
+    this.index.reset(sessionId);
+    this.processingSamples.length = 0;
+    this.eventSamples.length = 0;
+    this.inputBatches = 0;
+    this.inputDetections = 0;
+    this.outputEvents = 0;
+    this.lastStatus = 'idle';
+  }
+
+  process(batch: DetectionBatch): TrackingProcessingResult {
+    const trackingStart = performance.now();
+    const frame = this.tracker.update(batch);
+    const trackingMs = performance.now() - trackingStart;
+    const eventStart = performance.now();
+    const eventResult = this.engine.process(frame);
+    const eventMs = performance.now() - eventStart;
+    this.index.ingest(frame, eventResult.events, eventResult.suppressed);
+    this.inputBatches += frame.processed ? 1 : 0;
+    this.inputDetections += frame.detectionsProcessed;
+    this.outputEvents += eventResult.events.length;
+    this.lastStatus = frame.status;
+    if (frame.processed) {
+      this.processingSamples.push(trackingMs);
+      if (this.processingSamples.length > 200) this.processingSamples.shift();
+      this.eventSamples.push(eventMs);
+      if (this.eventSamples.length > 200) this.eventSamples.shift();
+    }
+    for (const event of eventResult.events) {
+      for (const listener of this.listeners) listener(event);
+    }
+    return { frame, events: eventResult.events, suppressedEvents: eventResult.suppressed, trackingMs, eventMs };
+  }
+
+  subscribe(listener: (event: ObjectEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  getTrackedObjects(filter: TrackFilter = {}): readonly TrackedObject[] { return this.index.getTrackedObjects(filter); }
+  getObjectById(trackId: string): TrackedObject | undefined { return this.index.getObjectById(trackId); }
+  getObjectsInRegion(region: ObjectRegion): readonly TrackedObject[] { return this.index.getObjectsInRegion(region); }
+  getObjectHistory(trackId: string, timeRange?: HistoryRange): readonly TrackHistoryPoint[] {
+    return this.index.getObjectHistory(trackId, timeRange);
+  }
+  getObjectEvents(filter: EventFilter = {}): readonly ObjectEvent[] { return this.index.getObjectEvents(filter); }
+  getObjectEvidence(trackId: string, timestampMs: number): EvidenceResolution {
+    return this.index.getObjectEvidence(trackId, timestampMs);
+  }
+  snapshot(): ObjectStateSnapshot { return this.index.snapshot(); }
+
+  diagnostics(): TrackingSystemSnapshot {
+    const state = this.index.snapshot();
+    return {
+      ...state,
+      processingP50Ms: percentile(this.processingSamples, 0.5),
+      processingP95Ms: percentile(this.processingSamples, 0.95),
+      eventP50Ms: percentile(this.eventSamples, 0.5),
+      eventP95Ms: percentile(this.eventSamples, 0.95),
+      associationFailures: this.tracker.trackerStats.associationFailures,
+      inputBatches: this.inputBatches,
+      inputDetections: this.inputDetections,
+      outputEvents: this.outputEvents,
+      lastStatus: this.lastStatus,
+    };
+  }
+}
