@@ -49,6 +49,8 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
   private readonly eventSamples: number[] = [];
   private inputBatches = 0;
   private inputDetections = 0;
+  private receivedDetections = 0;
+  private lowConfidenceDetections = 0;
   private outputEvents = 0;
   private lastStatus = 'idle';
   private readonly MAX_LISTENERS = 32;
@@ -77,6 +79,8 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
     this.eventSamples.length = 0;
     this.inputBatches = 0;
     this.inputDetections = 0;
+    this.receivedDetections = 0;
+    this.lowConfidenceDetections = 0;
     this.outputEvents = 0;
     this.lastStatus = 'idle';
   }
@@ -91,8 +95,10 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
     this.index.ingest(frame, eventResult.events, eventResult.suppressed);
     this.inputBatches += frame.processed ? 1 : 0;
     this.inputDetections += frame.detectionsProcessed;
+    this.receivedDetections += frame.receivedDetections;
+    this.lowConfidenceDetections += frame.lowConfidenceDetections;
     this.outputEvents += eventResult.events.length;
-    this.lastStatus = frame.status;
+    this.lastStatus = frame.invalidReason ? `${frame.status}: ${frame.invalidReason}` : frame.status;
     if (frame.processed) {
       this.processingSamples.push(trackingMs);
       if (this.processingSamples.length > 200) this.processingSamples.shift();
@@ -135,6 +141,8 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
       associationFailures: this.tracker.trackerStats.associationFailures,
       inputBatches: this.inputBatches,
       inputDetections: this.inputDetections,
+      receivedDetections: this.receivedDetections,
+      lowConfidenceDetections: this.lowConfidenceDetections,
       outputEvents: this.outputEvents,
       lastStatus: this.lastStatus,
       historyEntries: this.index.historyEntries,

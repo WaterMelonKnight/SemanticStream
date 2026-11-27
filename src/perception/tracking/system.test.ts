@@ -333,3 +333,11 @@ describe('expiry from a confirmed state', () => {
     expect(expired?.observedAtMs).toBe(2_100);
   });
 });
+
+describe('provider category ids', () => {
+  it('accepts opaque safe-integer category ids including unknown -1', () => {
+    const system = new ObjectTrackingSystem('opaque', { tracker: { confirmHits: 1 } });
+    system.process({ ...batch('opaque', 0, [detection('opaque', 10, 10, { categoryId: -1, at: 0 })]), frameSequence: 1 });
+    expect(system.getTrackedObjects()[0]?.categoryId).toBe(-1);
+  });
+});

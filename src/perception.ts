@@ -452,7 +452,7 @@ function renderObjectTracking(): void {
     return;
   }
   const snapshot = tracking.snapshot();
-  trackingStatus.textContent = sessionId ? `Session · ${sessionId}` : 'Idle';
+  trackingStatus.textContent = sessionId ? `Session · ${sessionId} · ${diagnostic?.lastStatus ?? 'idle'}` : 'Idle';
   trackingStatus.dataset.state = snapshot.activeCount > 0 ? 'ok' : 'idle';
   trackingActive.textContent = String(snapshot.activeCount);
   trackingTentative.textContent = String(snapshot.tentativeCount);
@@ -464,7 +464,7 @@ function renderObjectTracking(): void {
     `events · P50 ${formatMs(diagnostic?.eventP50Ms ?? null)} · P95 ${formatMs(diagnostic?.eventP95Ms ?? null)}`,
     `index · ${snapshot.indexEntries} entries · ${snapshot.indexEvictions} evictions · ${diagnostic?.associationFailures ?? 0} association failures`,
     `event log · ${snapshot.eventLogSize}/${snapshot.eventLogSize + snapshot.eventSuppressed} shown · ${snapshot.eventSuppressed} suppressed`,
-    `input · ${diagnostic?.inputBatches ?? 0} batches · ${diagnostic?.inputDetections ?? 0} detections · ${diagnostic?.outputEvents ?? 0} events`,
+    `input · ${diagnostic?.inputBatches ?? 0} batches · ${diagnostic?.receivedDetections ?? 0} received · ${diagnostic?.inputDetections ?? 0} accepted · ${diagnostic?.lowConfidenceDetections ?? 0} low-confidence · ${diagnostic?.outputEvents ?? 0} events`,
     `counts · ${Object.entries(snapshot.eventCounts).filter(([, count]) => count > 0).map(([type, count]) => `${type} ${count}`).join(' · ') || '—'}`,
   ];
   trackingMetrics.replaceChildren(...metrics.map((text) => {

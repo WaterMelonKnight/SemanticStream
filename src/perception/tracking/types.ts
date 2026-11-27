@@ -127,9 +127,11 @@ export interface TrackingFrameResult {
   readonly completedAtMs: number;
   readonly processed: boolean;
   readonly status: TrackingFrameStatus;
+  readonly invalidReason?: string;
   readonly tracks: readonly TrackedObject[];
   readonly expired: readonly TrackedObject[];
   readonly transitions: readonly TrackTransition[];
+  readonly receivedDetections: number;
   readonly detectionsProcessed: number;
   readonly lowConfidenceDetections: number;
   readonly associationFailures: number;
@@ -213,6 +215,8 @@ export interface TrackingSystemSnapshot extends ObjectStateSnapshot {
   readonly associationFailures: number;
   readonly inputBatches: number;
   readonly inputDetections: number;
+  readonly receivedDetections: number;
+  readonly lowConfidenceDetections: number;
   readonly outputEvents: number;
   readonly lastStatus: string;
   readonly historyEntries: number;

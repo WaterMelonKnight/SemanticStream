@@ -93,7 +93,8 @@ function validateBatch(batch: DetectionBatch, config: TrackingConfig): string | 
     if (observation.capturedAtMs < 0 || observation.submittedAtMs < observation.capturedAtMs || observation.completedAtMs < observation.submittedAtMs) return 'Observation timestamps are out of order.';
     if (observation.capturedAtMs > captured + 1) return 'Observation capture is newer than its batch capture.';
     if (!finite(observation.score) || observation.score < 0 || observation.score > 1) return 'Observation confidence must be finite within [0,1].';
-    if (!finite(observation.categoryId) || !Number.isSafeInteger(observation.categoryId) || observation.categoryId < 0) return 'categoryId must be a non-negative safe integer.';
+    // Category ids are opaque provider values; MediaPipe may use an unknown/negative index.
+    if (!finite(observation.categoryId) || !Number.isSafeInteger(observation.categoryId)) return 'categoryId must be a safe integer.';
     if (!observation.categoryName || typeof observation.categoryName !== 'string') return 'categoryName must be non-empty.';
     if (!finite(observation.box.x) || !finite(observation.box.y) || !finite(observation.box.width) || !finite(observation.box.height)) return 'Bounding box must be finite.';
     if (observation.box.width <= 0 || observation.box.height <= 0) return 'Bounding box dimensions must be positive.';
@@ -158,7 +159,7 @@ export class ObjectTracker {
     }
     if (!this.sessionId && batch.sessionId) this.sessionId = batch.sessionId;
     const validationError = validateBatch(batch, this.config);
-    if (validationError) return this.result(batch, false, 'invalid-observation');
+    if (validationError) return this.result(batch, false, 'invalid-observation', [], 0, 0, [], 0, validationError);
     const capturedAtMs = batch.capturedAtMs ?? batch.observedAtMs;
     const completedAtMs = batch.completedAtMs ?? batch.observedAtMs;
     if (this.lastFrameSequence !== null && batch.frameSequence <= this.lastFrameSequence) {
@@ -327,7 +328,7 @@ export class ObjectTracker {
     if (accepted.length > 0) {
       this.stats.associationFailures += [...this.tracks.values()].filter((track) => !matchedTracks.has(track.trackId)).length;
     }
-    return this.result(batch, true, 'ok', transitions, accepted.length, lowConfidence.length, newlyExpired);
+    return this.result(batch, true, 'ok', transitions, accepted.length, lowConfidence.length, newlyExpired, detections.length);
   }
 
   private result(
@@ -338,6 +339,8 @@ export class ObjectTracker {
     detectionsProcessed = 0,
     lowConfidenceDetections = 0,
     newlyExpired: TrackedObject[] = [],
+    receivedDetections = 0,
+    invalidReason?: string,
   ): TrackingFrameResult {
     const capturedAtMs = batch.capturedAtMs ?? batch.observedAtMs;
     const completedAtMs = batch.completedAtMs ?? batch.observedAtMs;
@@ -348,9 +351,11 @@ export class ObjectTracker {
       completedAtMs,
       processed,
       status,
+      invalidReason,
       tracks: [...this.tracks.values()],
       expired: newlyExpired,
       transitions,
+      receivedDetections,
       detectionsProcessed,
       lowConfidenceDetections,
       associationFailures: this.stats.associationFailures,
