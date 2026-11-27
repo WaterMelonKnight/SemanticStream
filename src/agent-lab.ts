@@ -395,7 +395,12 @@ el<HTMLFormElement>('gateway-form').onsubmit = async (event) => {
       limits: { ...baseLimits, slots: caps.slots, tokensPerTask: caps.outputLimit, inputTokensPerTask: caps.inputReserve,
         totalTokens: (caps.inputReserve + caps.outputLimit) * 100 },
     };
-    agent.setProvider(binding);
+    try {
+      agent.setProvider(binding);
+    } catch (error) {
+      el('gateway-address').textContent = error instanceof Error ? error.message : 'Gateway switch could not be applied';
+      return;
+    }
     poller = new BudgetPoller(() => adapter.budget(), systemClock.now);
     await poll();
     if (version !== gatewayGeneration) return;

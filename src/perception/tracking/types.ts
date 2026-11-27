@@ -59,6 +59,8 @@ export interface TrackedObject {
   readonly lastObservationAtMs: number;
   /** Time the current tracking state was confirmed. */
   readonly stateChangedAtMs: number;
+  /** Increments on state transitions, including transitions on the same clock tick. */
+  readonly stateRevision: number;
   /** Capture/completion time of first confirmation, or null while tentative. */
   readonly confirmedAtMs: number | null;
   readonly observationCount: number;
@@ -91,6 +93,8 @@ export interface ObjectEvent {
   readonly observedAtMs: number;
   readonly producedAtMs: number;
   readonly stateChangedAtMs: number;
+  /** Increments on state transitions, including transitions on the same clock tick. */
+  readonly stateRevision: number;
   readonly previousState: TrackingState;
   readonly currentState: TrackingState;
   readonly confidence: number;

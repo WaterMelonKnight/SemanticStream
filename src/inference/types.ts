@@ -79,10 +79,13 @@ export interface InferenceRequest {
   readonly textContext?: string;
   /** Serialized structured context selected by the caller. */
   readonly structuredText?: string;
-  readonly isStillRelevant?: () => boolean;
+  /** Admission-time eligibility, including event freshness. */
+  readonly canDispatch?: () => boolean;
+  /** Live semantic validity. Must not use the admission freshness window. */
+  readonly isOutputRelevant?: () => boolean;
 }
 
-export interface InferenceTask extends Readonly<Omit<InferenceRequest, 'ttlMs' | 'supersede' | 'supersedeLowerPriority' | 'textContext' | 'structuredText' | 'isStillRelevant'>> {
+export interface InferenceTask extends Readonly<Omit<InferenceRequest, 'ttlMs' | 'supersede' | 'supersedeLowerPriority' | 'textContext' | 'structuredText' | 'canDispatch' | 'isOutputRelevant'>> {
   readonly id: number;
   readonly sessionVersion: number;
   readonly interactionVersion: number;

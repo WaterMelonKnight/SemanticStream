@@ -7,7 +7,8 @@ import { DecisionEngine } from '../decision/engine';
 import { RuleBasedDecisionProvider } from '../decision/rule-provider';
 import type { TaskDefinition } from '../decision/types';
 import { InferenceScheduler } from '../inference/scheduler';
-import type { InferenceOrigin, RuntimeClock, SchedulingPolicy, StreamEvent } from '../inference/types';
+import type { RuntimeLimits } from '../inference/scheduler';
+import type { InferenceOrigin, InferenceProvider, RuntimeClock, SchedulingPolicy, StreamEvent } from '../inference/types';
 import type { CostView } from '../observability/cost';
 import { observeInference } from '../observability/inference';
 import { TelemetryHub } from '../observability/telemetry';
@@ -16,10 +17,11 @@ import { LatestFrameQueue } from '../perception/queue';
 import type { DetectorModelSpec, ObjectDetectorProvider } from '../perception/provider';
 import { DetectionTrigger } from '../perception/scheduler';
 import { mapModelBoxToSource } from '../perception/geometry';
+import { isCenterInside } from '../perception/tracking/events';
 import { ObjectTrackingSystem } from '../perception/tracking/system';
 import type { ObjectTrackingSystemConfig } from '../perception/tracking/system';
 import { normalizedCategory } from '../perception/tracking/tracker';
-import type { EvidenceResolution, FrameEvidenceRef, ObjectEvent } from '../perception/tracking/types';
+import type { EvidenceResolution, FrameEvidenceRef, ObjectEvent, ObjectRegion } from '../perception/tracking/types';
 import type { DetectionRequest, ObjectObservation, SourceKind, SourceTransform } from '../perception/types';
 import { isImportant, rulePolicy } from './policy';
 import type { AgentDecisionProvider, AgentInput, AgentTask, PolicyDecision, TaskStatus } from './policy';
@@ -76,7 +78,8 @@ export class AgentSession<T> {
   private readonly decisionEngine: DecisionEngine;
   private readonly clock: RuntimeClock;
   private readonly policy: AgentDecisionProvider;
-  private readonly runtimes = new WeakMap<AgentProvider, InferenceScheduler>();
+  private readonly runtimes = new WeakMap<InferenceProvider, { scheduler: InferenceScheduler; limits: RuntimeLimits }>();
+  private gatewayRuntime?: { scheduler: InferenceScheduler; limits: RuntimeLimits; adapter?: InferenceProvider };
   private sampling: SamplingSession<T> | undefined;
   private runtime: InferenceScheduler;
   private binding: AgentProvider;
@@ -101,6 +104,7 @@ export class AgentSession<T> {
     this.policy = options.policy ?? rulePolicy;
     this.binding = options.provider;
     this.runtime = this.runtimeFor(this.binding);
+    if (this.gatewayRuntime) this.gatewayRuntime.adapter = this.binding.adapter;
     this.decisionEngine = new DecisionEngine(this.rules, this.rules, { now: () => this.clock.now() });
     this.state = new ObjectTrackingSystem(this.sessionId, {
       ...options.tracking, clock: () => this.clock.now(),
@@ -112,26 +116,56 @@ export class AgentSession<T> {
   get sessionId(): string { return this.runtimeInstanceId + ':s' + this.generation; }
 
   private runtimeFor(binding: AgentProvider): InferenceScheduler {
-    const previous = this.runtimes.get(binding);
-    if (previous) return previous;
     if (!binding.capabilities.supportsText || !binding.capabilities.supportsStreaming
       || binding.capabilities.readiness !== 'ready' || binding.limits.slots > binding.capabilities.maxConcurrency) {
       throw new Error('Provider capabilities do not support this text session');
     }
-    const scheduler = new InferenceScheduler(binding.adapter, this.clock, binding.limits, this.options.scheduling ?? 'context-aware');
+    if (binding.capabilities.executionLocation === 'gateway') {
+      const previous = this.gatewayRuntime;
+      if (previous && sameLimits(previous.limits, binding.limits)) return previous.scheduler;
+      if (previous?.scheduler.hasUnsettledAttempts) {
+        throw new Error('Gateway resource settings changed while earlier requests still hold slots');
+      }
+      const gateway = {
+        limits: binding.limits, adapter: undefined as InferenceProvider | undefined,
+        scheduler: this.createRuntime(binding, {
+          start(task, signal, callbacks) {
+            if (gateway.adapter) gateway.adapter.start(task, signal, callbacks);
+            else callbacks.terminal({ status: 'failed', tokens: 0, reason: 'Gateway disconnected before dispatch' });
+          },
+        }),
+      };
+      this.gatewayRuntime = gateway;
+      return gateway.scheduler;
+    }
+    // A new capability descriptor must not mint capacity for the same adapter instance.
+    const previous = this.runtimes.get(binding.adapter);
+    if (previous) {
+      if (!sameLimits(previous.limits, binding.limits)) throw new Error('Resource limits changed for the same provider instance');
+      return previous.scheduler;
+    }
+    const scheduler = this.createRuntime(binding, binding.adapter);
+    this.runtimes.set(binding.adapter, { scheduler, limits: binding.limits });
+    return scheduler;
+  }
+
+  private createRuntime(binding: AgentProvider, adapter: InferenceProvider): InferenceScheduler {
+    const scheduler = new InferenceScheduler(adapter, this.clock, binding.limits, this.options.scheduling ?? 'context-aware');
     observeInference(scheduler, this.telemetry, binding.source, this.runtimeInstanceId);
-    this.runtimes.set(binding, scheduler);
     return scheduler;
   }
 
   setProvider(binding: AgentProvider): void {
+    if (binding === this.binding) return;
+    const previousGateway = this.gatewayRuntime;
     const next = this.runtimeFor(binding);
-    if (next === this.runtime) return;
-    this.runtime.newSession();
+    if (next !== this.runtime) this.runtime.newSession();
+    if (previousGateway) previousGateway.adapter = undefined;
     this.runtime = next;
     this.binding = binding;
     this.gatewayCost = undefined;
     this.resetSource();
+    if (binding.capabilities.executionLocation === 'gateway') this.gatewayRuntime!.adapter = binding.adapter;
   }
 
   setGatewayCost(view: CostView | undefined): void {
@@ -320,6 +354,7 @@ export class AgentSession<T> {
       this.telemetry.histogram(this.clock.now(), 'tracking', 'tracking_ms', result.trackingMs, 'ms', detector.source, identity);
       this.telemetry.histogram(this.clock.now(), 'events', 'event_processing_ms', result.eventMs, 'ms', detector.source, identity);
       this.telemetry.event(this.clock.now(), 'tracking', 'batch', detector.source, identity, { status: result.frame.status });
+      if (result.frame.processed) this.runtime.invalidateObsolete();
       for (const event of result.events) this.acceptSemanticEvent(event);
     } catch {
       if (this.detector === detector) this.failDetector();
@@ -338,7 +373,10 @@ export class AgentSession<T> {
     const now = this.clock.now();
     const prefix = this.sessionId + ':e';
     const serial = event.eventId.startsWith(prefix) ? Number(event.eventId.slice(prefix.length)) : NaN;
-    if (!this.sampling || event.sessionId !== this.sessionId || event.evidence.sessionId !== this.sessionId
+    const current = this.state.getObjectById(event.trackId);
+    const region = this.task.type === 'region' ? this.task.region : undefined;
+    const replaced = current ? !this.matchesState(event, region) : event.eventType !== 'OBJECT_EXPIRED';
+    if (!this.sampling || replaced || event.sessionId !== this.sessionId || event.evidence.sessionId !== this.sessionId
       || !Number.isSafeInteger(serial) || serial <= this.eventWatermark
       || ![event.producedAtMs, event.observedAtMs, event.evidence.capturedAtMs].every(Number.isFinite)
       || event.evidence.capturedAtMs > event.observedAtMs || event.observedAtMs > event.producedAtMs
@@ -349,7 +387,6 @@ export class AgentSession<T> {
       return;
     }
     this.eventWatermark = serial;
-    const current = this.state.getObjectById(event.trackId);
     this.decide({ kind: 'object', event, current }, event.eventType + ' · ' + event.categoryName, event.eventId);
   }
 
@@ -370,8 +407,9 @@ export class AgentSession<T> {
     const producedAtMs = event?.producedAtMs ?? now;
     const observedAtMs = event?.observedAtMs ?? now;
     const oldEvidence = event && (event.eventType.includes('LOST') || event.eventType === 'OBJECT_EXPIRED');
-    const fresh = now - producedAtMs <= EVENT_FRESH_MS && now - observedAtMs <= EVENT_FRESH_MS
-      && (!event || oldEvidence || now - event.evidence.capturedAtMs <= GAP_FRESH_MS);
+    const isFresh = (at: number) => at - producedAtMs <= EVENT_FRESH_MS && at - observedAtMs <= EVENT_FRESH_MS
+      && (!event || oldEvidence || at - event.evidence.capturedAtMs <= GAP_FRESH_MS);
+    const fresh = isFresh(now);
     const key = event ? event.trackId + ':' + event.eventType : input.kind;
     const state = this.runtime.snapshot();
     const { budget } = state;
@@ -410,16 +448,17 @@ export class AgentSession<T> {
       };
       const streamSource: StreamEvent['source'] = single ? 'user' : input.kind === 'monitor' ? 'scenario' : 'semantic';
       const structuredText = this.textContext(input, now);
+      const region = this.task.type === 'region' ? this.task.region : undefined;
+      const isOutputRelevant = () => this.sessionId === origin.sessionId && this.revision === origin.taskRevision
+        && this.interaction === origin.interactionVersion && (!event || this.matchesState(event, region));
       taskId = this.runtime.ingest({ source: streamSource, capturedAtMs: event?.evidence.capturedAtMs ?? now, label,
         reason: decision.reason, origin }, {
         channel: single ? 'response' : 'observation', priority,
         ttlMs: this.binding.deadlineMs, supersede: single, supersedeLowerPriority: !single && isImportant(input),
         dedupeKey: !single && !isImportant(input) ? key : undefined,
         structuredText,
-        isStillRelevant: () => this.sessionId === origin.sessionId && this.revision === origin.taskRevision
-          && this.interaction === origin.interactionVersion
-          && (single || (this.clock.now() - producedAtMs <= EVENT_FRESH_MS
-            && (!event || this.state.getObjectById(event.trackId)?.trackingState === event.currentState))),
+        canDispatch: () => single || isFresh(this.clock.now()),
+        isOutputRelevant,
       });
       this.recentlyDispatched.set(key, now);
       if (this.recentlyDispatched.size > 128) this.recentlyDispatched.delete(this.recentlyDispatched.keys().next().value!);
@@ -428,6 +467,15 @@ export class AgentSession<T> {
     }
     this.rows.push({ ...decision, id, label, sessionId: this.sessionId, consumedAtMs: now,
       producedAtMs, capturedAtMs: event?.evidence.capturedAtMs, taskId, event });
+  }
+
+  private matchesState(event: ObjectEvent, region?: ObjectRegion): boolean {
+    const track = this.state.getObjectById(event.trackId);
+    if (!track || track.stateRevision !== event.stateRevision || track.trackingState !== event.currentState) return false;
+    if (region && (event.eventType === 'OBJECT_ENTERED_REGION' || event.eventType === 'OBJECT_LEFT_REGION')) {
+      return isCenterInside(track.boundingBox, region) === (event.eventType === 'OBJECT_ENTERED_REGION');
+    }
+    return true;
   }
 
   private textContext(input: AgentInput, at: number): string {
@@ -498,4 +546,11 @@ export class AgentSession<T> {
       cost: this.gatewayCost && this.clock.now() - this.gatewayCost.atMs < 12_000 ? this.gatewayCost.view : undefined,
     };
   }
+}
+
+function sameLimits(a: RuntimeLimits, b: RuntimeLimits): boolean {
+  return a.slots === b.slots && a.queue === b.queue && a.totalTokens === b.totalTokens
+    && a.tokensPerTask === b.tokensPerTask && a.inputTokensPerTask === b.inputTokensPerTask
+    && a.terminalGraceMs === b.terminalGraceMs && a.transport.windowMs === b.transport.windowMs
+    && a.transport.maxFrames === b.transport.maxFrames && a.transport.maxBytes === b.transport.maxBytes;
 }

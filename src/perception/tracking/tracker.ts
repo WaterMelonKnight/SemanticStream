@@ -259,6 +259,7 @@ export class ObjectTracker {
         lastSeenAtMs: capturedAtMs,
         lastObservationAtMs: completedAtMs,
         stateChangedAtMs: changed ? completedAtMs : previous.stateChangedAtMs,
+        stateRevision: previous.stateRevision + Number(changed),
         confirmedAtMs,
         observationCount: previous.observationCount + 1,
         missedObservations: 0,
@@ -289,6 +290,7 @@ export class ObjectTracker {
           ...track,
           trackingState: 'EXPIRED',
           stateChangedAtMs: completedAtMs,
+          stateRevision: track.stateRevision + 1,
           missedObservations: track.missedObservations + 1,
         };
         this.tracks.delete(track.trackId);
@@ -300,6 +302,7 @@ export class ObjectTracker {
           ...track,
           trackingState: 'TEMPORARILY_LOST',
           stateChangedAtMs: completedAtMs,
+          stateRevision: track.stateRevision + 1,
           missedObservations: track.missedObservations + 1,
         };
         this.tracks.set(track.trackId, lost);
@@ -330,6 +333,7 @@ export class ObjectTracker {
         lastSeenAtMs: capturedAtMs,
         lastObservationAtMs: completedAtMs,
         stateChangedAtMs: completedAtMs,
+        stateRevision: 1,
         confirmedAtMs: state === 'CONFIRMED' ? completedAtMs : null,
         observationCount: 1,
         missedObservations: 0,

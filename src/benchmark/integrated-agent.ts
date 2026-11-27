@@ -280,5 +280,5 @@ async function replay(mode: Mode) {
 export async function runIntegratedBenchmark() {
   const variants = [];
   for (const mode of modes) variants.push(await replay(mode));
-  return { source: 'fixture', costs: 'unavailable · no paid provider', variants };
+  return { source: 'fixture', metric: 'authorized-response-coverage', costs: 'unavailable · no paid provider', variants };
 }

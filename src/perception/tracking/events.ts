@@ -255,6 +255,7 @@ export class ObjectEventEngine {
       observedAtMs: atMs,
       producedAtMs: this.producedAt(),
       stateChangedAtMs: track.stateChangedAtMs,
+      stateRevision: track.stateRevision,
       previousState,
       currentState,
       confidence,
@@ -275,7 +276,7 @@ function centerDistance(left: NormalizedBox, right: NormalizedBox): number {
   );
 }
 
-function isCenterInside(box: NormalizedBox, region: ObjectRegion): boolean {
+export function isCenterInside(box: NormalizedBox, region: ObjectRegion): boolean {
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
   return x >= region.x && x <= region.x + region.width && y >= region.y && y <= region.y + region.height;

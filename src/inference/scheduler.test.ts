@@ -91,6 +91,35 @@ describe('duplex inference scheduler', () => {
     expect(runtime.snapshot().attempts).toHaveLength(0);
   });
 
+  it('checks semantic output relevance even without a state-update sweep', () => {
+    const { runtime, ingest, partial, complete, call } = setup({ slots: 1 });
+    let current = true;
+    const id = ingest({ isOutputRelevant: () => current });
+    partial(id, 0, 'First part');
+    current = false;
+    partial(id, 1, 'Too late');
+    expect(call(id).signal.aborted).toBe(true);
+    expect(runtime.snapshot().outputs).toMatchObject([{ state: 'stopped', text: 'First part' }]);
+    expect(runtime.snapshot().budget.reservedTokens).toBe(10);
+    complete(id, 4);
+    expect(runtime.snapshot().budget.settledTokens).toBe(4);
+    expect(runtime.requestMeasurements()[0]).toMatchObject({ outcome: 'invalidated', stale: 1 });
+  });
+
+  it('settles a reliable terminal without promoting output whose state has been replaced', () => {
+    const { runtime, ingest, partial, complete } = setup({ slots: 1 });
+    let current = true;
+    const id = ingest({ isOutputRelevant: () => current });
+    partial(id);
+    current = false;
+    complete(id, 4);
+    complete(id, 4);
+    expect(runtime.snapshot().attempts).toHaveLength(0);
+    expect(runtime.snapshot().outputs).toMatchObject([{ state: 'stopped' }]);
+    expect(runtime.snapshot().budget).toMatchObject({ reservedTokens: 0, settledTokens: 4 });
+    expect(runtime.requestMeasurements()[0].outcome).toBe('invalidated');
+  });
+
   it('requires dependency success and rejects new work behind a retired dependency', () => {
     const { runtime, ingest, calls, complete } = setup();
     const parent = ingest();

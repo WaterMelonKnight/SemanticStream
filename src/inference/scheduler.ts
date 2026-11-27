@@ -14,7 +14,8 @@ type Outcome = 'completed' | 'failed' | 'cancelled' | 'expired' | 'invalidated' 
 interface ActiveTask {
   readonly task: InferenceTask;
   readonly clearDeadline: () => void;
-  readonly isStillRelevant?: () => boolean;
+  readonly canDispatch?: () => boolean;
+  readonly isOutputRelevant?: () => boolean;
   waitingFor?: number;
   slot?: number;
   startedAtMs?: number;
@@ -89,6 +90,15 @@ const MAX_EVIDENCE_ITEMS = 3;
 const MAX_EVIDENCE_AGE_MS = 3_000;
 const MAX_TIMER_MS = 2_147_483_647;
 const encoder = new TextEncoder();
+const OBSOLETE_REASON = 'Superseded by current object state or task scope';
+
+function allows(check?: () => boolean): boolean {
+  try {
+    return check?.() ?? true;
+  } catch {
+    return false;
+  }
+}
 
 function view({
   task, slot, startedAtMs, firstOutputAtMs, firstTextAtMs, requestId, providerRequestId, stopRequestedAtMs, stoppedAtMs, quarantined,
@@ -247,7 +257,7 @@ export class InferenceScheduler {
         this.finish(lowest, 'invalidated', 'Displaced by higher priority');
       }
       const work: ActiveTask = {
-        task, waitingFor: dependsOn, isStillRelevant: request.isStillRelevant,
+        task, waitingFor: dependsOn, canDispatch: request.canDispatch, isOutputRelevant: request.isOutputRelevant,
         clearDeadline: this.clock.after(Math.max(0, task.deadlineMs - this.clock.now()), () => {
           this.batch(() => this.finish(work, 'expired', 'Deadline expired'));
         }),
@@ -256,6 +266,19 @@ export class InferenceScheduler {
       this.record('queued', dependsOn === undefined ? 'Admitted' : 'Waiting for dependency #' + dependsOn, work);
     });
     return task.id;
+  }
+
+  /** Revoke obsolete work after a live state update, regardless of replacement admission. */
+  invalidateObsolete(): void {
+    this.batch(() => {
+      for (const work of this.active()) {
+        if (!allows(work.isOutputRelevant)) this.finish(work, 'invalidated', OBSOLETE_REASON);
+      }
+    });
+  }
+
+  get hasUnsettledAttempts(): boolean {
+    return this.attempts.size > 0;
   }
 
   interrupt(): void {
@@ -414,7 +437,7 @@ export class InferenceScheduler {
       this.finish(work, 'expired', 'Deadline expired before dispatch');
       return;
     }
-    if (work.isStillRelevant && !work.isStillRelevant()) {
+    if (!allows(work.isOutputRelevant) || !allows(work.canDispatch)) {
       this.finish(work, 'invalidated', 'Event is no longer relevant at dispatch');
       return;
     }
@@ -475,6 +498,9 @@ export class InferenceScheduler {
       work.providerRequestId = chunk.providerRequestId?.slice(0, 128);
       this.record('first-text', 'First text received', work, undefined, undefined, { upstreamMs: chunk.upstreamFirstTextMs });
     }
+    if (current && !work.outcome && !allows(work.isOutputRelevant)) {
+      this.batch(() => this.finish(work, 'invalidated', OBSOLETE_REASON));
+    }
     const active = current && !work.outcome;
     const decision = this.output.partial(task, chunk, attempt.nextIndex, active, this.session, this.interaction, now);
     if (chunk.index === attempt.nextIndex) attempt.nextIndex += 1;
@@ -520,6 +546,7 @@ export class InferenceScheduler {
         usage, usageUnknown: !known, upstreamMs: receipt.upstreamElapsedMs, providerRequestId: receipt.providerRequestId,
       });
     if (this.clock.now() >= task.deadlineMs) this.finish(work, 'expired', 'Terminal arrived at or after deadline');
+    else if (!allows(work.isOutputRelevant)) this.finish(work, 'invalidated', OBSOLETE_REASON);
     else this.finish(work, receipt.status, receipt.reason?.slice(0, 200) ?? 'Upstream ' + receipt.status);
   }
 

@@ -1,5 +1,6 @@
 {
   "source": "fixture",
+  "metric": "authorized-response-coverage",
   "costs": "unavailable · no paid provider",
   "variants": [
     {
@@ -82,7 +83,7 @@
               "label": "OBJECT_TEMPORARILY_LOST · person",
               "policy": "ESCALATE",
               "reason": "Every eligible event is offered to the scheduler",
-              "outcome": "completed"
+              "outcome": "invalidated"
             },
             {
               "label": "OBJECT_REAPPEARED · person",
@@ -455,7 +456,7 @@
               "label": "OBJECT_TEMPORARILY_LOST · person",
               "policy": "ESCALATE",
               "reason": "Relevant state transition has priority",
-              "outcome": "completed"
+              "outcome": "invalidated"
             },
             {
               "label": "OBJECT_REAPPEARED · person",
@@ -826,7 +827,7 @@
               "label": "OBJECT_TEMPORARILY_LOST · person",
               "policy": "ESCALATE",
               "reason": "Relevant state transition has priority",
-              "outcome": "completed"
+              "outcome": "invalidated"
             },
             {
               "label": "OBJECT_REAPPEARED · person",
