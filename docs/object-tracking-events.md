@@ -40,7 +40,7 @@ The tracker is deterministic tracking-by-detection:
 - A valid empty batch can move tracks to `TEMPORARILY_LOST`, then `EXPIRED` after the time window.
 - A skipped or failed detection batch **does not age or remove tracks**.
 - A reappearance within the association/expiry window can return to `CONFIRMED`.
-- Two same-category objects are never merged merely by category; if overlapping candidates are within the ambiguity margin, `associationUncertain` is set. No ReID/appearance model is used.
+- Two same-category objects are never merged merely by category; if overlapping candidates are within the ambiguity margin, `associationUncertain` is set. This is **not** model confidence, and no ReID/appearance model is used.
 
 Track IDs are page/session-scoped strings such as `perception-camera-3:o1`.
 
@@ -165,31 +165,54 @@ A future Phase 4I adapter can convert `OBJECT_APPEARED`/`OBJECT_MOVED`/`OBJECT_T
 - Real-device long-run thermal/battery behavior remains separate from this functional phase.
 
 
-## Benchmark snapshot (synthetic)
+## Core-review fixes (P1/P2)
 
-Latest deterministic run (`npm run benchmark:tracking`):
+- State index eviction now removes the matching history; entries are evicted expired-first, then lost/tentative, then confirmed.
+- Expired tracks are ingested once, not every batch. Expiry transitions are emitted once and tracker no longer retains an unbounded expired array.
+- Event-engine cooldown/box/movement/stationary/confirmed state is removed on expiry, capped by `maxStateTracks`, and cleaned by TTL. A 10,000-track churn test asserts tracker, index, history, event-log and event-state bounds.
+- Event time semantics:
+  - `lastSeenAtMs` is capture time.
+  - `lastObservationAtMs` is detection-completion time.
+  - `stateChangedAtMs`/`confirmedAtMs` record state transitions.
+  - lost/expired/event timestamps use the confirming batch completion time, not `lastSeenAtMs`.
+  - `OBJECT_EXPIRED` carries the exact previous state (for example `CONFIRMED` or `TEMPORARILY_LOST`).
+- Session switches require explicit reset; late wrong-session batches are rejected. Duplicate frame sequences, non-monotonic capture/completion times, invalid observations, boxes, scores and timestamps are rejected without aging tracks.
+- TENTATIVE tracks cannot emit `OBJECT_REAPPEARED`.
+- Evidence lookup never returns a future history point and distinguishes `available`, `unavailable`, `expired` and `wrong-session`.
+- `associationUncertain` is documented and carried on events as an association diagnostic, never as model confidence.
 
-| Fixture | ID switches | Assoc. correct | Event type P/R | First event | Processing ms |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| moving-object | 0 | 10/10 | 1.000 / 1.000 | 250 ms | ~2–3 |
-| stationary-jitter | 0 | 14/14 | 1.000 / 1.000 | 250 ms | <1 |
-| crossing-same-category | 0 | 10/10 | 0.667 / 1.000 | 250 ms | ~20 |
-| short-occlusion | 0 | 3/3 | 0.750 / 1.000 | 250 ms | <1 |
-| expiry-gap | 0 | 2/2 | 1.000 / 1.000 | 250 ms | <1 |
-| low-confidence | 0 | 0/0 | 1.000 / 1.000 | — | <1 |
-| irregular-intervals | 0 | 5/5 | 0.750 / 1.000 | 500 ms | <1 |
-| skipped-vs-empty | 0 | 2/2 | 1.000 / 1.000 | 250 ms | <1 |
-| session-switch | 0 | 4/4 | 1.000 / 1.000 | 250 ms | <1 |
-| camera-pan-ambiguity | 0 | 8/8 | 1.000 / 1.000 | 300 ms | <1 |
+## Benchmark snapshot (synthetic, v2)
 
-Processing time is wall-clock and varies. Crossing/camera-pan fixtures are deliberately ambiguous and are not identity-accuracy claims.
+`npm run benchmark:tracking` runs both **fixture-tuned** and **production-default** configurations. The report distinguishes:
+
+- **Type P/R** — only the set of event types present.
+- **Instance P/R** — one-to-one matching by session, synthetic label, event type and a time window; FP/FN, duplicate events and mean latency are reported.
+- Fixtures where identity is deliberately ambiguous are marked **NOT_MEASURED**, not scored as zero.
+
+Latest fixture-tuned result: instance macro precision `0.906`, recall `0.917`. Latest production-default result: precision `0.938`, recall `0.721`. The default configuration intentionally misses low-frequency short occlusions; that is reported as a miss, not hidden.
+
+Notable rows:
+
+| Fixture | Association correct / all detections | Reappearance switches | Instance P/R |
+| --- | ---: | ---: | --- |
+| moving-object | 10/10 | 0 | 1.000/1.000 tuned; 1.000/0.600 default |
+| short-occlusion | 3/3 | 0 | 1.000/1.000 tuned; 1.000/0.333 default |
+| occlusion-id-switch | 4/6 | 2 | NOT_MEASURED |
+| low-confidence | 0/6 | 0 | 1.000/1.000 (no object event) |
+| skipped-vs-empty | 2/2 | 0 | 1.000/1.000 tuned; 1.000/0.500 default |
+| crossing-same-category | 10/10 | 0 | NOT_MEASURED |
+| camera-pan-ambiguity | 8/8 | 0 | NOT_MEASURED |
+
+Association denominator includes every detection, including unmatched and low-confidence observations. Processing time is wall-clock only.
 
 ## Real-device observation
 
-Preview `https://f6f000f0.semanticstream.pages.dev` on a Redmi 22081212C / Android 14 / Xiaomi Browser 135.0.7049.79:
+Preview `https://c8aa861a.semanticstream.pages.dev` (pre-review) on a Redmi 22081212C / Android 14 / Xiaomi Browser 135.0.7049.79:
 
-- Stable tracks for a static scene: two active tracks retained 220+ observations with stable IDs.
-- Real image-space events observed: `OBJECT_APPEARED`, `OBJECT_MOVED` (`image-coordinate-only`), `OBJECT_STATIONARY`, `OBJECT_TEMPORARILY_LOST`, `OBJECT_EXPIRED`.
-- The ad-hoc hand-occlusion attempt produced temporary loss/expiry but did **not** produce a confirmed `OBJECT_REAPPEARED`; reliable real-device reappearance remains **NOT_TESTED**.
-- Object-index JSON export produced a bounded 24.2 KB snapshot. Tracking processing P50/P95 was ~0.1 ms and event processing ~0.0/0.1 ms on this device.
-- Backgrounding released the camera and required manual restart. The page reported long tasks from the existing inference/UI workload; tracking processing itself was sub-millisecond. No thermal/power measurement is claimed.
+- Stable tracks for a static scene retained 220+ observations with stable IDs.
+- Real image-space events: `OBJECT_APPEARED` 6, `OBJECT_MOVED` 15, `OBJECT_STATIONARY` 8, `OBJECT_TEMPORARILY_LOST` 4, `OBJECT_EXPIRED` 4.
+- The ad-hoc hand-occlusion attempt produced temporary loss/expiry but no confirmed `OBJECT_REAPPEARED`; real-device reappearance remains **NOT_TESTED**.
+- Object-index JSON export produced a bounded 24.2 KB snapshot.
+- Tracking processing P50/P95 was ~0.1 ms; event processing ~0.0/0.1 ms.
+- Backgrounding released the camera and required manual restart. Page long tasks came from the existing inference/UI workload; no controlled tracking-on/off delta was measured.
+- The latest review fixes were build/type/test/benchmark verified and receive a short final Preview regression; no full long-run performance repeat.

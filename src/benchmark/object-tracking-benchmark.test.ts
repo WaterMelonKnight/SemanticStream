@@ -4,7 +4,7 @@ import { runTrackingBenchmark, trackingReport } from './object-tracking-benchmar
 describe('synthetic tracking benchmark', () => {
   it('runs deterministic fixtures and reports bounded/indexed results', () => {
     const results = runTrackingBenchmark();
-    expect(results).toHaveLength(10);
+    expect(results).toHaveLength(11);
     const moving = results.find((result) => result.name === 'moving-object');
     expect(moving?.idSwitches).toBe(0);
     expect(moving?.associationCorrect).toBe(moving?.associationTotal);
@@ -16,5 +16,9 @@ describe('synthetic tracking benchmark', () => {
     const session = results.find((result) => result.name === 'session-switch');
     expect(session?.associationCorrect).toBe(session?.associationTotal);
     expect(trackingReport(results)).toContain('Synthetic ObjectObservation fixtures only');
+    expect(results.find((result) => result.name === 'crossing-same-category')?.eventInstanceMeasured).toBe(false);
+    const defaults = runTrackingBenchmark(undefined, { defaultConfig: true });
+    expect(defaults.every((result) => result.configLabel === 'production-default')).toBe(true);
+    expect(defaults.some((result) => result.eventInstanceMeasured)).toBe(true);
   });
 });

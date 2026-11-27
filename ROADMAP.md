@@ -99,6 +99,7 @@
 - Semantic event engine with image-coordinate-only movement, hysteresis, cooldown and evidence unavailable semantics.
 - Perception Lab toggle and bounded UI for track IDs, states, events, history and JSON export.
 - Phase 4I contracts and synthetic tracking/event benchmark; no paid model or scheduler changes.
+- Review hardening: expired-first bounded eviction with history cleanup, 10,000-track churn coverage, explicit completion-time events, strict session/time/observation validation, future-evidence protection and per-instance benchmark metrics.
 
 ## Next · Deployed validation and additional modalities
 

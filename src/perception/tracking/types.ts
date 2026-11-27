@@ -5,6 +5,7 @@ export const TRACKING_SCHEMA_VERSION = 1;
 export type TrackingState = 'TENTATIVE' | 'CONFIRMED' | 'TEMPORARILY_LOST' | 'EXPIRED';
 export type TrackTransitionType = 'appeared' | 'reappeared' | 'lost' | 'expired';
 export type DetectionBatchStatus = 'ok' | 'skipped' | 'failed';
+export type TrackingFrameStatus = DetectionBatchStatus | 'invalid-time' | 'invalid-frame' | 'invalid-observation' | 'wrong-session' | 'duplicate';
 export type ObjectEventType =
   | 'OBJECT_APPEARED'
   | 'OBJECT_MOVED'
@@ -44,8 +45,14 @@ export interface TrackedObject {
   readonly boundingBox: NormalizedBox;
   readonly confidence: number;
   readonly firstSeenAtMs: number;
+  /** Actual frame capture time of the latest matched observation. */
   readonly lastSeenAtMs: number;
+  /** Detection-completion time of the latest matched batch. */
   readonly lastObservationAtMs: number;
+  /** Time the current tracking state was confirmed. */
+  readonly stateChangedAtMs: number;
+  /** Capture/completion time of first confirmation, or null while tentative. */
+  readonly confirmedAtMs: number | null;
   readonly observationCount: number;
   readonly missedObservations: number;
   readonly velocity?: TrackVelocity;
@@ -74,6 +81,8 @@ export interface ObjectEvent {
   readonly previousState: TrackingState;
   readonly currentState: TrackingState;
   readonly confidence: number;
+  /** True when the association, not the model score, was ambiguous. */
+  readonly associationUncertain: boolean;
   readonly certainty: EventCertainty;
   readonly reason: string;
   readonly evidenceRef: string;
@@ -89,7 +98,12 @@ export interface ObjectRegion {
 
 export interface DetectionBatch {
   readonly sessionId: string;
+  /** Detection-completion time for this batch. */
   readonly observedAtMs: number;
+  /** Actual frame capture time; defaults to observedAtMs for old callers. */
+  readonly capturedAtMs?: number;
+  /** Detection completion time; defaults to observedAtMs. */
+  readonly completedAtMs?: number;
   readonly frameSequence: number;
   readonly frameWidth: number;
   readonly frameHeight: number;
@@ -109,8 +123,10 @@ export interface TrackTransition {
 export interface TrackingFrameResult {
   readonly sessionId: string;
   readonly observedAtMs: number;
+  readonly capturedAtMs: number;
+  readonly completedAtMs: number;
   readonly processed: boolean;
-  readonly status: DetectionBatchStatus | 'invalid-time' | 'invalid-frame';
+  readonly status: TrackingFrameStatus;
   readonly tracks: readonly TrackedObject[];
   readonly expired: readonly TrackedObject[];
   readonly transitions: readonly TrackTransition[];
@@ -162,7 +178,7 @@ export interface HistoryRange {
   readonly toMs: number;
 }
 
-export type EvidenceStatus = 'available' | 'unavailable' | 'wrong-session';
+export type EvidenceStatus = 'available' | 'unavailable' | 'expired' | 'wrong-session';
 
 export interface EvidenceResolution {
   readonly status: EvidenceStatus;
@@ -199,6 +215,11 @@ export interface TrackingSystemSnapshot extends ObjectStateSnapshot {
   readonly inputDetections: number;
   readonly outputEvents: number;
   readonly lastStatus: string;
+  readonly historyEntries: number;
+  readonly trackerTracks: number;
+  readonly eventStateEntries: number;
+  readonly activeEvictions: number;
+  readonly listenerCount: number;
 }
 
 export const TRACKING_DEFAULTS: TrackingConfig = {

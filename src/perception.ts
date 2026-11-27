@@ -415,7 +415,9 @@ function trackForObservation(observation: ObjectObservation): TrackedObject | un
 
 function formatTrackEvent(event: ObjectEvent): string {
   return `t+${(event.observedAtMs / 1_000).toFixed(2)}s · ${event.eventType} · ${event.trackId}`
-    + ` · ${event.categoryName} · ${event.reason} · ${event.certainty}`;
+    + ` · ${event.categoryName} · confidence ${event.confidence.toFixed(3)}`
+    + ` · ${event.reason} · ${event.certainty}`
+    + (event.associationUncertain ? ' · association-ambiguous (not model confidence)' : '');
 }
 
 function renderObjectTracking(): void {
@@ -484,7 +486,8 @@ function renderObjectTracking(): void {
       const history = tracking.getObjectHistory(track.trackId).slice(-12).reverse();
       const evidence = tracking.getObjectEvidence(track.trackId, track.lastObservationAtMs);
       const rows = [
-        `selected · ${track.trackId} · ${track.categoryName} · ${track.trackingState} · confidence ${track.confidence.toFixed(3)}`,
+        `selected · ${track.trackId} · ${track.categoryName} · ${track.trackingState} · model confidence ${track.confidence.toFixed(3)}`
+          + (track.associationUncertain ? ' · association-ambiguous (not model confidence)' : ''),
         `first/last · ${formatDuration(track.firstSeenAtMs)} / ${formatDuration(track.lastSeenAtMs)} · observations ${track.observationCount}`,
         `evidence · ${evidence.status} · ${evidence.message}`,
         ...history.map((point) => `history · ${formatDuration(point.atMs)} · ${point.trackingState}`
@@ -530,6 +533,10 @@ function recordTrackingTelemetry(result: TrackingProcessingResult): void {
   telemetry.gauge(now, 'tracking', 'output_events', diagnostic.outputEvents, 'events', 'real', identity);
   telemetry.gauge(now, 'tracking', 'event_suppressed', snapshot.eventSuppressed, 'events', 'real', identity);
   telemetry.gauge(now, 'tracking', 'event_log_size', snapshot.eventLogSize, 'events', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'history_entries', diagnostic.historyEntries, 'entries', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'event_state_entries', diagnostic.eventStateEntries, 'tracks', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'tracker_tracks', diagnostic.trackerTracks, 'tracks', 'real', identity);
+  telemetry.gauge(now, 'tracking', 'active_evictions', diagnostic.activeEvictions, 'evictions', 'real', identity);
   if (diagnostic.processingP50Ms !== null) telemetry.gauge(now, 'tracking', 'processing_p50_ms', diagnostic.processingP50Ms, 'ms', 'real', identity);
   if (diagnostic.processingP95Ms !== null) telemetry.gauge(now, 'tracking', 'processing_p95_ms', diagnostic.processingP95Ms, 'ms', 'real', identity);
   if (diagnostic.eventP50Ms !== null) telemetry.gauge(now, 'events', 'processing_p50_ms', diagnostic.eventP50Ms, 'ms', 'real', identity);
@@ -677,6 +684,8 @@ function handleDetection(result: DetectionResponse): void {
       const trackingResult = tracking.process({
         sessionId,
         observedAtMs: completedAtMs,
+        capturedAtMs: request.capturedAtMs,
+        completedAtMs,
         frameSequence: result.frameSequence,
         frameWidth: FEED_WIDTH,
         frameHeight: FEED_HEIGHT,

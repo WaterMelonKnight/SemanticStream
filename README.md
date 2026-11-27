@@ -58,7 +58,7 @@ The model/runtime licenses, exact versions, sizes, sources, CSP and deployment l
 
 The Perception Lab now has an opt-in **Track objects & semantic events** mode. It adds stable page/session track IDs, track states, bounded object history, a semantic event timeline, selected-object evidence status, and an exportable object-index JSON view. Tracking is deterministic tracking-by-detection (IoU + normalized center distance + time gate); it is image-coordinate-only, has no camera-motion compensation, and does not claim ReID or long-term identity.
 
-Only valid detection batches can age or expire tracks. Skipped/failed detection batches cannot make an object disappear. The state index and event log are bounded and session-scoped; no image cache is shared between Perception Lab and Runtime Lab, so evidence is explicitly unavailable unless a future resolver is attached.
+Only valid detection batches can age or expire tracks. Skipped/failed detection batches cannot make an object disappear. The state index and event log are bounded and session-scoped, evict expired-first and remove evicted histories; expired objects are not re-ingested. Event timestamps use detection completion while capture time is retained separately; session changes require explicit reset; evidence distinguishes unavailable, expired and wrong-session. No image cache is shared between Perception Lab and Runtime Lab, so evidence is unavailable unless a future resolver is attached.
 
 Run the deterministic synthetic benchmark with `npm run benchmark:tracking`. See [object tracking and semantic events](docs/object-tracking-events.md) for the state machine, event rules, Phase 4I contracts and limitations.
 

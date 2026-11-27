@@ -98,7 +98,7 @@
           </label>
           <p class="note small">Frames are prepared at 320 × 320 with letterboxing, not from the 96 × 54 sampling thumbnail. Only one request is in flight; one latest pending request is kept and older pending frames are counted as dropped. Page state compares 5 s input vs detection and queue wait; inference P50/P95 are shown separately.</p>
           <label class="tracking-toggle"><input id="tracking-enabled" type="checkbox" checked /> Track objects &amp; semantic events</label>
-          <p id="tracking-toggle-note" class="note small">Tracking is deterministic, image-coordinate only, and bounded. No camera-motion compensation; <code>OBJECT_EXPIRED</code> is not a physical-removal claim.</p>
+          <p id="tracking-toggle-note" class="note small">Tracking is deterministic, image-coordinate only, and bounded. No camera-motion compensation; <code>OBJECT_EXPIRED</code> is not a physical-removal claim. <code>association-ambiguous</code> is an association diagnostic, not model confidence.</p>
           <div class="stats-grid">
             <div><span>Effective detection FPS</span><b id="stat-fps">0.00 fps</b></div>
             <div><span>Last 5 s detection FPS</span><b id="stat-fps-5s">0.00 fps</b></div>

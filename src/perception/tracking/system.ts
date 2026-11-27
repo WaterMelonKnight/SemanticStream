@@ -51,6 +51,7 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
   private inputDetections = 0;
   private outputEvents = 0;
   private lastStatus = 'idle';
+  private readonly MAX_LISTENERS = 32;
 
   constructor(sessionId: string, config: ObjectTrackingSystemConfig = {}) {
     this.tracker = new ObjectTracker(config.tracker);
@@ -105,8 +106,10 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
   }
 
   subscribe(listener: (event: ObjectEvent) => void): () => void {
+    if (this.listeners.size >= this.MAX_LISTENERS) throw new RangeError('Too many semantic event listeners.');
     this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    let active = true;
+    return () => { if (active) { active = false; this.listeners.delete(listener); } };
   }
 
   getTrackedObjects(filter: TrackFilter = {}): readonly TrackedObject[] { return this.index.getTrackedObjects(filter); }
@@ -116,8 +119,8 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
     return this.index.getObjectHistory(trackId, timeRange);
   }
   getObjectEvents(filter: EventFilter = {}): readonly ObjectEvent[] { return this.index.getObjectEvents(filter); }
-  getObjectEvidence(trackId: string, timestampMs: number): EvidenceResolution {
-    return this.index.getObjectEvidence(trackId, timestampMs);
+  getObjectEvidence(trackId: string, timestampMs: number, sessionId = this.sessionId): EvidenceResolution {
+    return this.index.getObjectEvidence(trackId, timestampMs, sessionId);
   }
   snapshot(): ObjectStateSnapshot { return this.index.snapshot(); }
 
@@ -134,6 +137,11 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
       inputDetections: this.inputDetections,
       outputEvents: this.outputEvents,
       lastStatus: this.lastStatus,
+      historyEntries: this.index.historyEntries,
+      trackerTracks: this.tracker.activeTracks.length,
+      eventStateEntries: this.engine.stateEntries,
+      activeEvictions: this.index.activeEvictionCount,
+      listenerCount: this.listeners.size,
     };
   }
 }

@@ -38,15 +38,27 @@ export class ObjectStateIndex {
   private indexEvictions = 0;
   private eventEvictions = 0;
   private eventSuppressed = 0;
+  private activeEvictions = 0;
 
   constructor(sessionId: string, config: Partial<ObjectStateIndexConfig> = {}) {
     this.sessionId = sessionId;
     this.config = { ...DEFAULTS, ...config };
+    for (const [key, value] of Object.entries({
+      maxTracks: this.config.maxTracks,
+      maxHistoryPerTrack: this.config.maxHistoryPerTrack,
+      historyWindowMs: this.config.historyWindowMs,
+      maxEvents: this.config.maxEvents,
+    })) {
+      if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${key} must be a non-negative safe integer.`);
+    }
+    if (this.config.maxTracks < 1 || this.config.maxHistoryPerTrack < 1 || this.config.maxEvents < 1) throw new RangeError('State-index capacities must be positive.');
   }
 
   get currentSessionId(): string { return this.sessionId; }
   get size(): number { return this.tracks.size; }
   get evidenceResolver(): EvidenceResolver | undefined { return this.config.evidenceResolver; }
+  get historyEntries(): number { return this.histories.size; }
+  get activeEvictionCount(): number { return this.activeEvictions; }
 
   reset(sessionId: string): void {
     this.sessionId = sessionId;
@@ -56,27 +68,36 @@ export class ObjectStateIndex {
     this.indexEvictions = 0;
     this.eventEvictions = 0;
     this.eventSuppressed = 0;
+    this.activeEvictions = 0;
   }
 
   ingest(result: TrackingFrameResult, events: readonly ObjectEvent[], suppressed = 0): void {
     if (!result.processed) return;
-    if (result.sessionId !== this.sessionId) this.reset(result.sessionId);
-    const all = [...result.tracks, ...result.expired];
-    for (const track of all) this.upsert(track, result.observedAtMs);
+    // Session switching is an explicit system reset; never let late data reset the index.
+    if (result.sessionId !== this.sessionId) return;
+    for (const track of [...result.tracks, ...result.expired]) this.upsert(track);
     this.addEvents(events);
     this.eventSuppressed += suppressed;
   }
 
-  private upsert(track: TrackedObject, atMs: number): void {
-    if (!this.tracks.has(track.trackId) && this.tracks.size >= this.config.maxTracks) {
-      const oldest = [...this.tracks.values()].sort((left, right) => left.lastSeenAtMs - right.lastSeenAtMs)[0];
-      if (oldest) this.tracks.delete(oldest.trackId);
-      this.indexEvictions += 1;
+  private upsert(track: TrackedObject): void {
+    const existing = this.tracks.get(track.trackId);
+    if (existing?.trackingState === 'EXPIRED') return; // do not re-ingest/replay expired tracks
+    if (!existing && this.tracks.size >= this.config.maxTracks) {
+      const evict = this.evictionCandidate();
+      if (evict) {
+        this.tracks.delete(evict.trackId);
+        this.histories.delete(evict.trackId); // keep track and history ownership in sync
+        this.indexEvictions += 1;
+        if (evict.trackingState !== 'EXPIRED') this.activeEvictions += 1;
+      }
     }
     this.tracks.set(track.trackId, track);
     const history = this.histories.get(track.trackId) ?? [];
     const previous = history[history.length - 1];
-    if (!previous || previous.atMs !== atMs || previous.trackingState !== track.trackingState) {
+    const stateChanged = track.trackingState !== existing?.trackingState;
+    const atMs = stateChanged ? track.stateChangedAtMs : track.lastSeenAtMs;
+    if (!previous || atMs > previous.atMs || (atMs === previous.atMs && track.trackingState !== previous.trackingState)) {
       history.push({
         atMs,
         boundingBox: track.boundingBox,
@@ -85,14 +106,28 @@ export class ObjectStateIndex {
         evidenceRef: track.evidenceRef,
       });
     }
-    const cutoff = atMs - this.config.historyWindowMs;
+    const cutoff = Math.max(track.lastSeenAtMs, track.stateChangedAtMs) - this.config.historyWindowMs;
     while (history.length && history[0].atMs < cutoff) history.shift();
     while (history.length > this.config.maxHistoryPerTrack) history.shift();
     this.histories.set(track.trackId, history);
   }
 
+  /** Prefer expired, then lost/tentative, and evict confirmed active objects last. */
+  private evictionCandidate(): TrackedObject | undefined {
+    const rank = (track: TrackedObject): number => {
+      if (track.trackingState === 'EXPIRED') return 0;
+      if (track.trackingState === 'TEMPORARILY_LOST') return 1;
+      if (track.trackingState === 'TENTATIVE') return 2;
+      return 3;
+    };
+    return [...this.tracks.values()].sort((left, right) => rank(left) - rank(right)
+      || left.lastSeenAtMs - right.lastSeenAtMs
+      || left.trackId.localeCompare(right.trackId))[0];
+  }
+
   private addEvents(events: readonly ObjectEvent[]): void {
     for (const event of events) {
+      if (event.sessionId !== this.sessionId) continue;
       const duplicate = this.events.some((existing) => existing.eventId === event.eventId);
       if (duplicate) {
         this.eventSuppressed += 1;
@@ -144,26 +179,29 @@ export class ObjectStateIndex {
     });
   }
 
-  getObjectEvidence(trackId: string, timestampMs: number): EvidenceResolution {
+  getObjectEvidence(trackId: string, timestampMs: number, sessionId = this.sessionId): EvidenceResolution {
+    if (sessionId !== this.sessionId) {
+      return { status: 'wrong-session', sessionId: this.sessionId, trackId, requestedAtMs: timestampMs,
+        message: 'The requested session does not own this object index.' };
+    }
     const track = this.tracks.get(trackId);
     const history = this.histories.get(trackId) ?? [];
-    const point = [...history].reverse().find((item) => item.atMs <= timestampMs) ?? history[0];
+    const point = [...history].reverse().find((item) => item.atMs <= timestampMs);
     if (!track || !point) {
-      return {
-        status: 'unavailable', sessionId: this.sessionId, trackId, requestedAtMs: timestampMs,
-        message: 'No structured observation exists for this track and time.',
-      };
+      return { status: 'unavailable', sessionId: this.sessionId, trackId, requestedAtMs: timestampMs,
+        message: 'No structured observation exists at or before the requested time.' };
+    }
+    if (track.trackingState === 'EXPIRED') {
+      return { status: 'expired', sessionId: this.sessionId, trackId, requestedAtMs: timestampMs,
+        evidenceRef: point.evidenceRef, capturedAtMs: point.atMs,
+        message: 'The object state is expired; this is not a physical-removal or image-availability claim.' };
     }
     if (!this.config.evidenceResolver) {
-      return {
-        status: 'unavailable', sessionId: this.sessionId, trackId, requestedAtMs: timestampMs,
-        evidenceRef: point.evidenceRef,
-        message: 'Evidence is unavailable: no image cache is attached to this perception session.',
-      };
+      return { status: 'unavailable', sessionId: this.sessionId, trackId, requestedAtMs: timestampMs,
+        evidenceRef: point.evidenceRef, capturedAtMs: point.atMs,
+        message: 'Evidence is unavailable: no image cache is attached to this perception session.' };
     }
-    return this.config.evidenceResolver.resolve({
-      sessionId: this.sessionId, trackId, evidenceRef: point.evidenceRef, atMs: point.atMs,
-    });
+    return this.config.evidenceResolver.resolve({ sessionId: this.sessionId, trackId, evidenceRef: point.evidenceRef, atMs: point.atMs });
   }
 
   snapshot(): ObjectStateSnapshot {

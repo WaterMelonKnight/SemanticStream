@@ -17,7 +17,7 @@ export interface ObjectStateReader {
   getObjectsInRegion(region: ObjectRegion): readonly TrackedObject[];
   getObjectHistory(trackId: string, timeRange?: HistoryRange): readonly TrackHistoryPoint[];
   getObjectEvents(filter?: EventFilter): readonly ObjectEvent[];
-  getObjectEvidence(trackId: string, timestampMs: number): EvidenceResolution;
+  getObjectEvidence(trackId: string, timestampMs: number, sessionId?: string): EvidenceResolution;
   snapshot(): ObjectStateSnapshot;
 }
 

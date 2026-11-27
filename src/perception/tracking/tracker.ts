@@ -7,14 +7,17 @@ import {
   type TrackedObject,
   type TrackingConfig,
   type TrackingFrameResult,
+  type TrackingFrameStatus,
   type TrackVelocity,
   type TrackerStats,
 } from './types';
 
-type UnknownObservation = never;
-
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+function finite(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 export function normalizeBox(observation: ObjectObservation, frameWidth: number, frameHeight: number): NormalizedBox {
@@ -57,11 +60,11 @@ function predictedBox(track: TrackedObject, elapsedMs: number, enableVelocity: b
   return { ...track.boundingBox, x, y };
 }
 
-function withVelocity(previous: TrackedObject, box: NormalizedBox, atMs: number): TrackVelocity | undefined {
-  if (atMs <= previous.lastObservationAtMs) return previous.velocity;
+function withVelocity(previous: TrackedObject, box: NormalizedBox, capturedAtMs: number): TrackVelocity | undefined {
+  if (capturedAtMs <= previous.lastSeenAtMs) return previous.velocity;
   const oldCenter = boxCenter(previous.boundingBox);
   const newCenter = boxCenter(box);
-  const seconds = (atMs - previous.lastObservationAtMs) / 1_000;
+  const seconds = (capturedAtMs - previous.lastSeenAtMs) / 1_000;
   if (seconds <= 0) return previous.velocity;
   return { xPerSecond: (newCenter.x - oldCenter.x) / seconds, yPerSecond: (newCenter.y - oldCenter.y) / seconds };
 }
@@ -74,62 +77,110 @@ function emptyStats(): TrackerStats {
   };
 }
 
+function validateBatch(batch: DetectionBatch, config: TrackingConfig): string | null {
+  if (!batch.sessionId) return 'sessionId must be non-empty.';
+  if (!finite(batch.frameWidth) || batch.frameWidth <= 0 || !finite(batch.frameHeight) || batch.frameHeight <= 0) return 'Frame dimensions must be positive finite numbers.';
+  if (!finite(batch.frameSequence) || batch.frameSequence < 0) return 'frameSequence must be a non-negative finite number.';
+  if (!finite(batch.observedAtMs)) return 'observedAtMs must be finite.';
+  const captured = batch.capturedAtMs ?? batch.observedAtMs;
+  const completed = batch.completedAtMs ?? batch.observedAtMs;
+  if (!finite(captured) || !finite(completed) || captured < 0) return 'Capture/completion times must be finite and non-negative.';
+  if (completed < captured) return 'Detection completion cannot precede capture.';
+  if (batch.status !== 'ok') return null;
+  for (const observation of batch.detections) {
+    if (observation.sessionId !== batch.sessionId) return 'Observation session does not match its batch.';
+    if (!finite(observation.capturedAtMs) || !finite(observation.submittedAtMs) || !finite(observation.completedAtMs)) return 'Observation timestamps must be finite.';
+    if (observation.capturedAtMs < 0 || observation.submittedAtMs < observation.capturedAtMs || observation.completedAtMs < observation.submittedAtMs) return 'Observation timestamps are out of order.';
+    if (observation.capturedAtMs > captured + 1) return 'Observation capture is newer than its batch capture.';
+    if (!finite(observation.score) || observation.score < 0 || observation.score > 1) return 'Observation confidence must be finite within [0,1].';
+    if (!finite(observation.categoryId) || !Number.isSafeInteger(observation.categoryId) || observation.categoryId < 0) return 'categoryId must be a non-negative safe integer.';
+    if (!observation.categoryName || typeof observation.categoryName !== 'string') return 'categoryName must be non-empty.';
+    if (!finite(observation.box.x) || !finite(observation.box.y) || !finite(observation.box.width) || !finite(observation.box.height)) return 'Bounding box must be finite.';
+    if (observation.box.width <= 0 || observation.box.height <= 0) return 'Bounding box dimensions must be positive.';
+    if (!finite(observation.frameSequence) || observation.frameSequence < 0) return 'Observation frameSequence must be non-negative.';
+    if (!observation.evidence || typeof observation.evidence.frameRef !== 'string' || !observation.evidence.frameRef) return 'Evidence frameRef must be non-empty.';
+  }
+  if (batch.detections.length > config.maxTracks * 4) return 'Detection batch exceeds the bounded tracking capacity.';
+  return null;
+}
+
+function validateConfig(config: TrackingConfig): void {
+  const numbers = ['minConfidence', 'minIou', 'maxCenterDistance', 'maxAssociationGapMs', 'lostAfterMs', 'expireAfterMs', 'confirmHits', 'maxTracks', 'ambiguityMargin'];
+  for (const key of numbers) {
+    const value = config[key as keyof TrackingConfig];
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw new RangeError(`${key} must be a non-negative finite number.`);
+  }
+  if (config.minConfidence > 1 || config.minIou > 1 || config.ambiguityMargin > 1) throw new RangeError('Normalized thresholds must be <= 1.');
+  if (config.maxCenterDistance > 1) throw new RangeError('maxCenterDistance must be <= 1.');
+  if (config.confirmHits < 1 || !Number.isSafeInteger(config.confirmHits)) throw new RangeError('confirmHits must be a positive integer.');
+  if (config.maxTracks < 1 || !Number.isSafeInteger(config.maxTracks)) throw new RangeError('maxTracks must be a positive integer.');
+  if (config.lostAfterMs > config.expireAfterMs) throw new RangeError('lostAfterMs must not exceed expireAfterMs.');
+  if (config.maxAssociationGapMs > config.expireAfterMs) throw new RangeError('maxAssociationGapMs must not exceed expireAfterMs.');
+}
+
 /**
- * Deterministic tracking-by-detection. It is intentionally independent of DOM,
- * model providers and page code. A skipped/failed batch never ages or removes a
- * track; only a valid (`ok`) detection batch can imply absence.
+ * Deterministic tracking-by-detection. A skipped/failed batch never ages a
+ * track; only a valid (`ok`) detection batch can imply absence. Session changes
+ * require an explicit reset; old-session batches are rejected.
  */
 export class ObjectTracker {
   private config: TrackingConfig;
   private sessionId = '';
   private readonly tracks = new Map<string, TrackedObject>();
-  private readonly expired: TrackedObject[] = [];
   private nextTrackSerial = 0;
-  private lastBatchAtMs: number | null = null;
+  private lastFrameSequence: number | null = null;
+  private lastCapturedAtMs: number | null = null;
+  private lastCompletedAtMs: number | null = null;
   private stats: TrackerStats = emptyStats();
 
   constructor(config: Partial<TrackingConfig> = {}) {
     this.config = { ...TRACKING_DEFAULTS, ...config };
+    validateConfig(this.config);
   }
 
-  get currentSessionId(): string {
-    return this.sessionId;
-  }
-
-  get activeTracks(): readonly TrackedObject[] {
-    return [...this.tracks.values()];
-  }
-
-  get trackerStats(): TrackerStats {
-    return { ...this.stats };
-  }
+  get currentSessionId(): string { return this.sessionId; }
+  get activeTracks(): readonly TrackedObject[] { return [...this.tracks.values()]; }
+  get trackerStats(): TrackerStats { return { ...this.stats }; }
 
   reset(sessionId = ''): void {
     this.sessionId = sessionId;
     this.tracks.clear();
-    this.expired.length = 0;
     this.nextTrackSerial = 0;
-    this.lastBatchAtMs = null;
+    this.lastFrameSequence = null;
+    this.lastCapturedAtMs = null;
+    this.lastCompletedAtMs = null;
     this.stats = emptyStats();
   }
 
   update(batch: DetectionBatch): TrackingFrameResult {
-    if (!(batch.frameWidth > 0) || !(batch.frameHeight > 0)) {
-      return this.result(batch, false, 'invalid-frame', [], 0, 0);
+    if (this.sessionId && batch.sessionId !== this.sessionId) {
+      return this.result(batch, false, 'wrong-session');
     }
-    if (this.sessionId !== batch.sessionId) this.reset(batch.sessionId);
-    if (this.lastBatchAtMs !== null && batch.observedAtMs < this.lastBatchAtMs) {
-      return this.result(batch, false, 'invalid-time', [], 0, 0);
+    if (!this.sessionId && batch.sessionId) this.sessionId = batch.sessionId;
+    const validationError = validateBatch(batch, this.config);
+    if (validationError) return this.result(batch, false, 'invalid-observation');
+    const capturedAtMs = batch.capturedAtMs ?? batch.observedAtMs;
+    const completedAtMs = batch.completedAtMs ?? batch.observedAtMs;
+    if (this.lastFrameSequence !== null && batch.frameSequence <= this.lastFrameSequence) {
+      return this.result(batch, false, 'duplicate');
     }
+    if (this.lastCapturedAtMs !== null && capturedAtMs <= this.lastCapturedAtMs) {
+      return this.result(batch, false, 'duplicate');
+    }
+    if (this.lastCompletedAtMs !== null && completedAtMs < this.lastCompletedAtMs) {
+      return this.result(batch, false, 'invalid-time');
+    }
+    this.lastFrameSequence = batch.frameSequence;
+    this.lastCapturedAtMs = capturedAtMs;
+    this.lastCompletedAtMs = completedAtMs;
     if (batch.status !== 'ok') {
       this.stats.inputBatches += 1;
       if (batch.status === 'skipped') this.stats.skippedBatches += 1;
       else this.stats.failedBatches += 1;
       return this.result(batch, false, batch.status);
     }
-    this.stats.inputBatches += 1;
-    this.lastBatchAtMs = batch.observedAtMs;
 
+    this.stats.inputBatches += 1;
     const detections = batch.detections.map((observation) => ({
       observation,
       box: normalizeBox(observation, batch.frameWidth, batch.frameHeight),
@@ -140,13 +191,14 @@ export class ObjectTracker {
     const accepted = detections.filter((item) => item.observation.score >= this.config.minConfidence);
 
     const transitions: TrackTransition[] = [];
+    const newlyExpired: TrackedObject[] = [];
     const matchedTracks = new Set<string>();
     const matchedDetections = new Set<number>();
-    const candidates: Array<{ track: TrackedObject; detectionIndex: number; cost: number; ambiguous: boolean }> = [];
+    const candidates: Array<{ track: TrackedObject; detectionIndex: number; cost: number }> = [];
 
     for (const track of this.tracks.values()) {
       if (track.trackingState === 'EXPIRED') continue;
-      const elapsed = batch.observedAtMs - track.lastObservationAtMs;
+      const elapsed = capturedAtMs - track.lastSeenAtMs;
       if (elapsed > this.config.maxAssociationGapMs) continue;
       const predicted = predictedBox(track, elapsed, this.config.enableVelocity);
       for (let index = 0; index < accepted.length; index += 1) {
@@ -156,7 +208,7 @@ export class ObjectTracker {
         const distance = centerDistance(predicted, detection.box);
         if (overlap < this.config.minIou && distance > this.config.maxCenterDistance) continue;
         const cost = (1 - overlap) * 0.7 + distance * 0.5 + (1 - detection.observation.score) * 0.1;
-        candidates.push({ track, detectionIndex: index, cost, ambiguous: false });
+        candidates.push({ track, detectionIndex: index, cost });
       }
     }
 
@@ -167,40 +219,47 @@ export class ObjectTracker {
       if (matchedTracks.has(candidate.track.trackId) || matchedDetections.has(candidate.detectionIndex)) continue;
       const sameTrack = candidates.filter((other) => other.track.trackId === candidate.track.trackId
         && !matchedDetections.has(other.detectionIndex));
-      const ambiguous = sameTrack.length > 1
-        && sameTrack[1].cost - sameTrack[0].cost <= this.config.ambiguityMargin;
+      const ambiguous = sameTrack.length > 1 && sameTrack[1].cost - sameTrack[0].cost <= this.config.ambiguityMargin;
       if (ambiguous) this.stats.ambiguousMatches += 1;
       matchedTracks.add(candidate.track.trackId);
       matchedDetections.add(candidate.detectionIndex);
       const detection = accepted[candidate.detectionIndex];
       const previous = candidate.track;
-      const matchedBox = detection.box;
       const state: TrackedObject['trackingState'] = previous.trackingState === 'TEMPORARILY_LOST'
         ? 'CONFIRMED'
         : previous.trackingState === 'TENTATIVE' && previous.observationCount + 1 >= this.config.confirmHits
           ? 'CONFIRMED' : previous.trackingState;
+      const changed = state !== previous.trackingState;
+      const confirmedAtMs = state === 'CONFIRMED'
+        ? (previous.confirmedAtMs ?? completedAtMs)
+        : previous.confirmedAtMs;
       const updated: TrackedObject = {
         ...previous,
-        boundingBox: matchedBox,
+        boundingBox: detection.box,
         confidence: detection.observation.score,
-        lastSeenAtMs: batch.observedAtMs,
-        lastObservationAtMs: batch.observedAtMs,
+        lastSeenAtMs: capturedAtMs,
+        lastObservationAtMs: completedAtMs,
+        stateChangedAtMs: changed ? completedAtMs : previous.stateChangedAtMs,
+        confirmedAtMs,
         observationCount: previous.observationCount + 1,
         missedObservations: 0,
-        velocity: withVelocity(previous, matchedBox, batch.observedAtMs),
+        velocity: withVelocity(previous, detection.box, capturedAtMs),
         trackingState: state,
         evidenceRef: detection.observation.evidence.frameRef,
         associationUncertain: ambiguous,
       };
       this.tracks.set(updated.trackId, updated);
       if (previous.trackingState === 'TEMPORARILY_LOST') {
-        transitions.push({ type: 'reappeared', track: updated, previousState: previous.trackingState, atMs: batch.observedAtMs, reason: 'matched_after_temporary_loss' });
+        if (previous.confirmedAtMs !== null) {
+          transitions.push({ type: 'reappeared', track: updated, previousState: previous.trackingState, atMs: completedAtMs, reason: 'matched_after_temporary_loss' });
+        } else {
+          transitions.push({ type: 'appeared', track: updated, previousState: 'TENTATIVE', atMs: completedAtMs, reason: 'confirmed_after_hits' });
+        }
       } else if (previous.trackingState === 'TENTATIVE' && state === 'CONFIRMED') {
-        transitions.push({ type: 'appeared', track: updated, previousState: previous.trackingState, atMs: batch.observedAtMs, reason: 'confirmed_after_hits' });
+        transitions.push({ type: 'appeared', track: updated, previousState: previous.trackingState, atMs: completedAtMs, reason: 'confirmed_after_hits' });
       }
     }
 
-    // Create tracks only for valid detections that could not be matched.
     for (let index = 0; index < accepted.length; index += 1) {
       if (matchedDetections.has(index)) continue;
       if (this.tracks.size >= this.config.maxTracks) {
@@ -217,9 +276,11 @@ export class ObjectTracker {
         categoryName: detection.observation.categoryName,
         boundingBox: detection.box,
         confidence: detection.observation.score,
-        firstSeenAtMs: batch.observedAtMs,
-        lastSeenAtMs: batch.observedAtMs,
-        lastObservationAtMs: batch.observedAtMs,
+        firstSeenAtMs: capturedAtMs,
+        lastSeenAtMs: capturedAtMs,
+        lastObservationAtMs: completedAtMs,
+        stateChangedAtMs: completedAtMs,
+        confirmedAtMs: state === 'CONFIRMED' ? completedAtMs : null,
         observationCount: 1,
         missedObservations: 0,
         trackingState: state,
@@ -230,28 +291,34 @@ export class ObjectTracker {
       matchedTracks.add(trackId);
       this.stats.createdTracks += 1;
       if (state === 'CONFIRMED') {
-        transitions.push({ type: 'appeared', track, previousState: 'TENTATIVE', atMs: batch.observedAtMs, reason: 'confirmed_on_first_hit' });
+        transitions.push({ type: 'appeared', track, previousState: 'TENTATIVE', atMs: completedAtMs, reason: 'confirmed_on_first_hit' });
       }
     }
 
-    // Only a valid batch can age unmatched tracks.
+    // Only a valid batch can age tracks. Gaps use capture time; transition time uses completion time.
     for (const track of [...this.tracks.values()]) {
       if (matchedTracks.has(track.trackId)) continue;
-      const gap = batch.observedAtMs - track.lastObservationAtMs;
+      const gap = capturedAtMs - track.lastSeenAtMs;
       if (gap > this.config.expireAfterMs) {
-        const expired: TrackedObject = { ...track, trackingState: 'EXPIRED', missedObservations: track.missedObservations + 1 };
+        const expired: TrackedObject = {
+          ...track,
+          trackingState: 'EXPIRED',
+          stateChangedAtMs: completedAtMs,
+          missedObservations: track.missedObservations + 1,
+        };
         this.tracks.delete(track.trackId);
-        this.expired.push(expired);
-        if (this.expired.length > this.config.maxTracks) this.expired.shift();
+        newlyExpired.push(expired);
         this.stats.expiredTracks += 1;
-        transitions.push({ type: 'expired', track: expired, previousState: track.trackingState, atMs: batch.observedAtMs, reason: 'expiry_gap' });
+        transitions.push({ type: 'expired', track: expired, previousState: track.trackingState, atMs: completedAtMs, reason: 'expiry_gap' });
       } else if (gap > this.config.lostAfterMs && track.trackingState !== 'TEMPORARILY_LOST') {
         const lost: TrackedObject = {
-          ...track, trackingState: 'TEMPORARILY_LOST',
+          ...track,
+          trackingState: 'TEMPORARILY_LOST',
+          stateChangedAtMs: completedAtMs,
           missedObservations: track.missedObservations + 1,
         };
         this.tracks.set(track.trackId, lost);
-        transitions.push({ type: 'lost', track: lost, previousState: track.trackingState, atMs: batch.observedAtMs, reason: 'valid_empty_gap' });
+        transitions.push({ type: 'lost', track: lost, previousState: track.trackingState, atMs: completedAtMs, reason: 'valid_empty_gap' });
       } else {
         this.tracks.set(track.trackId, { ...track, missedObservations: track.missedObservations + 1 });
       }
@@ -260,24 +327,29 @@ export class ObjectTracker {
     if (accepted.length > 0) {
       this.stats.associationFailures += [...this.tracks.values()].filter((track) => !matchedTracks.has(track.trackId)).length;
     }
-    return this.result(batch, true, 'ok', transitions, accepted.length, lowConfidence.length);
+    return this.result(batch, true, 'ok', transitions, accepted.length, lowConfidence.length, newlyExpired);
   }
 
   private result(
     batch: DetectionBatch,
     processed: boolean,
-    status: TrackingFrameResult['status'],
+    status: TrackingFrameStatus,
     transitions: TrackTransition[] = [],
     detectionsProcessed = 0,
     lowConfidenceDetections = 0,
+    newlyExpired: TrackedObject[] = [],
   ): TrackingFrameResult {
+    const capturedAtMs = batch.capturedAtMs ?? batch.observedAtMs;
+    const completedAtMs = batch.completedAtMs ?? batch.observedAtMs;
     return {
       sessionId: this.sessionId,
-      observedAtMs: batch.observedAtMs,
+      observedAtMs: completedAtMs,
+      capturedAtMs,
+      completedAtMs,
       processed,
       status,
       tracks: [...this.tracks.values()],
-      expired: [...this.expired],
+      expired: newlyExpired,
       transitions,
       detectionsProcessed,
       lowConfidenceDetections,
@@ -285,5 +357,3 @@ export class ObjectTracker {
     };
   }
 }
-
-export type { UnknownObservation };

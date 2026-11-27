@@ -47,7 +47,11 @@ describe('object state index contracts', () => {
     const system = new ObjectTrackingSystem('a', { ...config, index: { maxTracks: 2, maxHistoryPerTrack: 2, maxEvents: 1, historyWindowMs: 1_000 } });
     system.process(batch(0, [observation(0, 10)]));
     system.process(batch(100, [observation(100, 12)]));
-    system.process({ ...batch(200, [observation(200, 16)]), sessionId: 'b' });
+    const wrong = system.process({ ...batch(200, [observation(200, 16)]), sessionId: 'b' });
+    expect(wrong.frame.status).toBe('wrong-session');
+    expect(system.snapshot().sessionId).toBe('a');
+    system.reset('b');
+    system.process({ ...batch(300, [observation(300, 16)]), sessionId: 'b' });
     expect(system.snapshot().sessionId).toBe('b');
     expect(system.getTrackedObjects().every((track) => track.sessionId === 'b')).toBe(true);
     expect(system.getObjectHistory(system.getTrackedObjects()[0]?.trackId ?? 'missing')).toBeDefined();
