@@ -76,6 +76,11 @@ export class ObjectStateIndex {
     // Session switching is an explicit system reset; never let late data reset the index.
     if (result.sessionId !== this.sessionId) return;
     for (const track of [...result.tracks, ...result.expired]) this.upsert(track);
+    const cutoff = result.completedAtMs - this.config.historyWindowMs;
+    for (const [id, history] of this.histories) {
+      while (history.length && history[0].atMs < cutoff) history.shift();
+      if (!history.length) this.histories.delete(id);
+    }
     this.addEvents(events);
     this.eventSuppressed += suppressed;
   }
@@ -84,6 +89,7 @@ export class ObjectStateIndex {
     const existing = this.tracks.get(track.trackId);
     if (existing?.trackingState === 'EXPIRED') return; // do not re-ingest/replay expired tracks
     if (!existing && this.tracks.size >= this.config.maxTracks) {
+      if (track.trackingState === 'EXPIRED') return;
       const evict = this.evictionCandidate();
       if (evict) {
         this.tracks.delete(evict.trackId);
@@ -96,7 +102,7 @@ export class ObjectStateIndex {
     const history = this.histories.get(track.trackId) ?? [];
     const previous = history[history.length - 1];
     const stateChanged = track.trackingState !== existing?.trackingState;
-    const atMs = stateChanged ? track.stateChangedAtMs : track.lastSeenAtMs;
+    const atMs = stateChanged ? track.stateChangedAtMs : track.lastObservationAtMs;
     if (!previous || atMs > previous.atMs || (atMs === previous.atMs && track.trackingState !== previous.trackingState)) {
       history.push({
         atMs,
@@ -104,10 +110,9 @@ export class ObjectStateIndex {
         confidence: track.confidence,
         trackingState: track.trackingState,
         evidenceRef: track.evidenceRef,
+        evidence: track.evidence,
       });
     }
-    const cutoff = Math.max(track.lastSeenAtMs, track.stateChangedAtMs) - this.config.historyWindowMs;
-    while (history.length && history[0].atMs < cutoff) history.shift();
     while (history.length > this.config.maxHistoryPerTrack) history.shift();
     this.histories.set(track.trackId, history);
   }
@@ -191,17 +196,24 @@ export class ObjectStateIndex {
       return { status: 'unavailable', sessionId: this.sessionId, trackId, requestedAtMs: timestampMs,
         message: 'No structured observation exists at or before the requested time.' };
     }
-    if (track.trackingState === 'EXPIRED') {
+    if (point.trackingState === 'EXPIRED' && !this.config.evidenceResolver) {
       return { status: 'expired', sessionId: this.sessionId, trackId, requestedAtMs: timestampMs,
-        evidenceRef: point.evidenceRef, capturedAtMs: point.atMs,
+        evidenceRef: point.evidenceRef, capturedAtMs: point.evidence.capturedAtMs, frameSequence: point.evidence.frameSequence,
         message: 'The object state is expired; this is not a physical-removal or image-availability claim.' };
     }
     if (!this.config.evidenceResolver) {
       return { status: 'unavailable', sessionId: this.sessionId, trackId, requestedAtMs: timestampMs,
-        evidenceRef: point.evidenceRef, capturedAtMs: point.atMs,
+        evidenceRef: point.evidenceRef, capturedAtMs: point.evidence.capturedAtMs, frameSequence: point.evidence.frameSequence,
         message: 'Evidence is unavailable: no image cache is attached to this perception session.' };
     }
-    return this.config.evidenceResolver.resolve({ sessionId: this.sessionId, trackId, evidenceRef: point.evidenceRef, atMs: point.atMs });
+    const result = this.config.evidenceResolver.resolve({
+      ...point.evidence, trackId, evidenceRef: point.evidenceRef, atMs: timestampMs,
+    });
+    return {
+      status: result.status, message: result.message, sessionId: this.sessionId, trackId,
+      requestedAtMs: timestampMs, evidenceRef: point.evidenceRef, capturedAtMs: point.evidence.capturedAtMs,
+      frameSequence: point.evidence.frameSequence,
+    };
   }
 
   snapshot(): ObjectStateSnapshot {

@@ -219,6 +219,18 @@ export class SamplingSession<T> {
     this.timeline.clear();
   }
 
+  inspectFrame(sessionId: string, sequence: number, capturedAtMs: number) {
+    return this.context.inspectFrame(sessionId, sequence, capturedAtMs);
+  }
+
+  retrieveLatest(sessionId = this.sessionId) {
+    return this.retrieval.getLatestFrame(sessionId);
+  }
+
+  retrieveAtOrBefore(timestampMs: number, sessionId = this.sessionId) {
+    return this.retrieval.getFrameAtOrBefore(sessionId, timestampMs);
+  }
+
   retrieveFrame(sequence: number) {
     return this.retrieval.getFrameBySequence(this.sessionId, sequence);
   }

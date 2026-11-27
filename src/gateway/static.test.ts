@@ -6,9 +6,9 @@ import { localGateway } from './fixtures';
 import { contentSecurityPolicyFor, mediaTypeFor, staticFileAllowed } from './server';
 
 describe('gateway static security policy', () => {
-  it('allows the three pages, Vite assets, benchmark data, and the exact MediaPipe module wasm', () => {
+  it('allows the diagnostic and integrated pages, Vite assets, benchmark data, and the exact MediaPipe module wasm', () => {
     for (const name of [
-      'index.html', 'runtime.html', 'perception.html', 'favicon.png',
+      'index.html', 'runtime.html', 'perception.html', 'agent.html', 'favicon.png',
       'assets/index-abc123.js', 'assets/perception-abc123.css', 'benchmark/latest.json',
       'mediapipe/wasm/1.2.3/vision_wasm_module_internal.js',
       'mediapipe/wasm/1.2.3/vision_wasm_module_internal.wasm',
@@ -37,6 +37,7 @@ describe('gateway static security policy', () => {
     expect(perception).toContain("worker-src 'self' blob:");
     expect(perception).toContain('https://storage.googleapis.com');
     expect(perception).toContain("frame-ancestors 'none'");
+    expect(contentSecurityPolicyFor('agent.html')).toBe(perception);
   });
 });
 

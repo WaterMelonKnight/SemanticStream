@@ -162,6 +162,10 @@ export class ActiveRetrievalService {
     );
   }
 
+  getFrameAtOrBefore(sessionId: string, timestampMs: number): FrameRetrievalResponse {
+    return this.frameRequest('getFrameAtTimestamp', sessionId, () => this.buffer.getFrameAtOrBefore(sessionId, timestampMs));
+  }
+
   getFramesBetween(
     sessionId: string,
     startMs: number,

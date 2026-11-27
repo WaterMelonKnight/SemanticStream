@@ -302,3 +302,7 @@ The browser still owns admission policy, snapshots and output arbitration. The o
 The gateway's static allowlist explicitly serves `perception.html` and only the versioned MediaPipe module files, with `.wasm` MIME and page-specific CSP. `index.html`/`runtime.html` keep the original CSP; `perception.html` alone adds `wasm-unsafe-eval`, `worker-src`, and `connect-src` for the pinned Google Storage model. No model weights or arbitrary static paths are served. The text gateway and perception detector are independent. The default gateway mode is the scripted/mock provider; a real paid call requires explicit operator configuration and smoke invocation.
 
 [Provider contract, recovery and deployment assessment](docs/real-streaming-provider.md)
+
+## Phase 4I · Integrated Agent
+
+`AgentSession` owns one source and one Phase 3R sampling/retrieval scope. Detector work follows adaptive acceptance. The tracker publishes causal events and exact evidence references to the task policy. The inference scheduler consumes bounded text snapshots and emits trace records directly to the telemetry sink. Gateway cost and concurrent holds remain server-authoritative. [Integrated runtime architecture](docs/integrated-agent-runtime.md)

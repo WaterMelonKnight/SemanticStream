@@ -109,3 +109,14 @@
 - Add opt-in image transfer to a vision-capable model using bounded snapshots and separate upload and provider budgets. Evaluate visual semantics separately from frame selection.
 - Optionally add TTS behind the output coordinator with bounded, interruptible playback.
 - Defer heterogeneous pools, GPU execution, native bidirectional model transport and training.
+
+## Phase 4I · Integrated event-driven Agent
+
+- Connect adaptive visual sampling, opt-in detection, tracking, task policy, text inference and local history through one Agent Lab.
+- Measure the capture-to-terminal path and compare all-eligible FIFO, task-aware FIFO and context-aware scheduling under identical fixture budgets.
+- Keep gateway access same-origin and explicit. Verify the Agent with Mock and local assets before live provider trials.
+
+## Phase 4I-L · Browser-local text inference
+
+- Measure the local execution and memory limit using the provider capability contract. Start with explicit downloads and one measured local execution slot.
+- Keep local and Gateway choices explicit. Preserve slot settlement and output arbitration at the same runtime boundary.

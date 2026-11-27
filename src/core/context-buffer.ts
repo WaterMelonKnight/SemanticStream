@@ -248,6 +248,29 @@ export class ContextBuffer {
     return this.availableLookup(frame);
   }
 
+  /** Inspect an exact reference without cloning or transferring pixels. */
+  inspectFrame(sessionId: string, sequence: number, capturedAtMs: number): DataStatus {
+    const mismatch = this.sessionProblem(sessionId);
+    if (mismatch) return mismatch.status;
+    const frame = this.frames.find((entry) => entry.sequence === sequence);
+    if (frame) return frame.timestampMs === capturedAtMs ? 'available' : 'nonexistent';
+    return this.firstCapturedSequence !== null && sequence >= this.firstCapturedSequence
+      && sequence <= (this.lastCapturedSequence ?? 0) ? 'evicted' : 'nonexistent';
+  }
+
+  getFrameAtOrBefore(sessionId: string, timestampMs: number): FrameLookupResult {
+    const mismatch = this.sessionProblem(sessionId);
+    if (mismatch) return mismatch;
+    validateFinite(timestampMs, 'Requested timestamp');
+    let index = this.frames.length - 1;
+    while (index >= 0 && this.frames[index].timestampMs > timestampMs) index -= 1;
+    const frame = this.frames[index];
+    if (frame) return this.availableLookup(frame);
+    return this.firstCapturedTimestampMs !== null && this.firstCapturedTimestampMs <= timestampMs
+      ? this.emptyLookup('evicted', 'The historical frame is no longer retained.')
+      : this.emptyLookup('nonexistent', 'No frame at or before the requested timestamp.');
+  }
+
   getFrameAtTimestamp(sessionId: string, timestampMs: number, toleranceMs = 100): FrameLookupResult {
     const mismatch = this.sessionProblem(sessionId);
     if (mismatch) return mismatch;

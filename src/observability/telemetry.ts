@@ -168,7 +168,7 @@ export class TelemetryHub {
   exportCsv(): string {
     const rows: string[][] = [[
       'record_type','id','at_ms','module','kind','name','value','unit','source',
-      'session_id','task_id','request_id','provider_request_id','attributes',
+      'session_id','task_id','request_id','provider_request_id','attributes','runtime_instance_id','event_id','frame_sequence',
     ]];
     const snapshot = this.snapshot();
     for (const event of snapshot.events) {
@@ -177,14 +177,15 @@ export class TelemetryHub {
         event.value === undefined ? '' : String(event.value), event.unit ?? '', event.source,
         event.sessionId ?? '', event.taskId === undefined ? '' : String(event.taskId),
         event.requestId ?? '', event.providerRequestId ?? '',
-        event.attributes ? JSON.stringify(event.attributes) : '',
+        event.attributes ? JSON.stringify(event.attributes) : '', event.runtimeInstanceId ?? '', event.eventId ?? '',
+        event.frameSequence === undefined ? '' : String(event.frameSequence),
       ]);
     }
     for (const series of snapshot.series) {
       for (const point of series.points) {
         rows.push([
           'series', '', String(point.atMs), '', 'gauge', series.name, String(point.value), series.unit ?? '',
-          series.source, series.sessionId ?? '', '', '', '', '',
+          series.source, series.sessionId ?? '', '', '', '', '', '', '', '',
         ]);
       }
     }
@@ -231,6 +232,9 @@ export function telemetryToOpenTelemetryHint(event: TelemetryEvent): OpenTelemet
       ...(event.attributes ?? {}),
     },
     traceAttributes: {
+      ...(event.runtimeInstanceId ? { 'semanticstream.runtime_instance_id': event.runtimeInstanceId } : {}),
+      ...(event.eventId ? { 'semanticstream.event_id': event.eventId } : {}),
+      ...(event.frameSequence !== undefined ? { 'semanticstream.frame_sequence': event.frameSequence } : {}),
       ...(event.sessionId ? { 'semanticstream.session_id': event.sessionId } : {}),
       ...(event.taskId !== undefined ? { 'semanticstream.task_id': event.taskId } : {}),
       ...(event.requestId ? { 'semanticstream.request_id': event.requestId } : {}),

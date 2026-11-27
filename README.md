@@ -25,6 +25,12 @@ The live demo compares a fixed sampler with a configurable adaptive sampler:
 
 Both branches use 125 ms minimum delivery spacing, a 1.5 s silence refresh, and the configured rolling five-second frame cap. The adaptive branch is the agent under test: its real-time deliveries go through the shared ex-ante admission gate and are recorded with the retrieval ledger. The fixed branch is the side-by-side comparison baseline.
 
+## Integrated Agent Lab
+
+Run Vite and open `/agent.html`. Trigger a system monitor event for a repeatable Mock demo. For visual tracking, load a local video or explicitly start the camera, enable the detector, and apply an Object Watch or Region Watch task. The Lab links detector observations, semantic decisions, evidence lookup and streaming output through one session. Camera, detector download and text Gateway access are opt-in. The picture stays local.
+
+Run `npm run benchmark:integrated` for the deterministic fixture comparison. The original sampling, perception and inference pages remain available for diagnosis. [Agent architecture and runbook](docs/integrated-agent-runtime.md)
+
 ## Live Vision Runtime Lab
 
 Open **Live Vision Runtime Lab** from the visual demo or go to `/runtime.html` after starting Vite. Trigger a routine load change or a critical replica anomaly in the synthetic system monitor. Send a text turn during generation or interrupt an in-flight response. Select **Ignore cancel · unknown usage** to see output stop while an upstream slot drains and the token reservation becomes provisional. Use a recent frame sequence to retrieve a thumbnail through the visual budget.
