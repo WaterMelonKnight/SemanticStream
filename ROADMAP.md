@@ -92,7 +92,17 @@
 - Show actual FPS, cache/transfer, queue/slots, task outcomes/reasons, P50/P95 latency, tokens, stale/blocked outputs and cost; keep perception and inference sessions explicitly separate.
 - Add unit tests for cost arithmetic, poll overlap/error handling, telemetry bounds/privacy/session isolation, and runtime summaries; add browser smoke for Mock, seeded-gateway and mobile layouts.
 
+## Phase 4P.2 · Object tracking, state index and semantic events
+
+- Deterministic tracking-by-detection with time-based association and track states.
+- Bounded, session-scoped object history/state/event index.
+- Semantic event engine with image-coordinate-only movement, hysteresis, cooldown and evidence unavailable semantics.
+- Perception Lab toggle and bounded UI for track IDs, states, events, history and JSON export.
+- Phase 4I contracts and synthetic tracking/event benchmark; no paid model or scheduler changes.
+- Review hardening: expired-first bounded eviction with history cleanup, 10,000-track churn coverage, explicit completion-time events, strict session/time/observation validation, future-evidence protection and per-instance benchmark metrics.
+
 ## Next · Deployed validation and additional modalities
+
 
 
 - Validate the gateway against a real, explicitly authorized endpoint and evaluate a Workers relay with durable shared admission.

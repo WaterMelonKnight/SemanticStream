@@ -217,6 +217,20 @@ D is not guaranteed to beat the baselines. It misses the capture-pause visible e
 
 The corrected artifacts are `benchmarks/results/phase3a-corrected.{json,csv,md}` and `public/benchmark/phase3a-corrected.json`. They track actual replay delivery times and spatial coverage. The historical reports remain available.
 
+## Phase 4P.2 · Object tracking and semantic events
+
+`src/perception/tracking/` is a pure, bounded tracking layer over `ObjectObservation`. It does not own a model, DOM, inference scheduler or global event bus.
+
+- `ObjectTracker`: same-category IoU/normalized-center/time-gated tracking-by-detection, one-to-one deterministic association, optional bounded velocity prediction, confidence floor, and `TENTATIVE`/`CONFIRMED`/`TEMPORARILY_LOST`/`EXPIRED` states.
+- Only a `status: 'ok'` detection batch can age tracks. Skipped/failed batches are not absence evidence. Low-confidence detections are counted but do not confirm or move objects.
+- `ObjectEventEngine`: appeared, moved, stationary, temporarily lost, reappeared and expired events, with movement threshold, stationary hysteresis, per-track/type cooldown, bounded suppression and finite reason codes.
+- `ObjectStateIndex`: session-scoped bounded tracks, history and events; normalized boxes, confidence, state and evidence refs only. No duplicate frames. Eviction is expired-first, removes the associated history, and never re-ingests expired tracks. Event-engine per-track state is TTL/capacity cleaned; a 10,000-track churn test covers all internal bounds.
+- Time semantics: capture time (`lastSeenAtMs`) is separate from detection completion (`lastObservationAtMs`) and state confirmation (`stateChangedAtMs`/`confirmedAtMs`). Lost/expired events use the confirming completion time, not capture time. Session changes require explicit reset; duplicate, out-of-order, wrong-session and invalid batches are rejected.
+- `SemanticEventSource`, `ObjectStateReader` and `EvidenceResolver` are the Phase 4I boundary. Evidence returns `unavailable` unless a shared image cache is attached; Perception and Runtime Lab do not share a session.
+- Perception Lab exposes a toggle, track IDs/states, active/lost/expired counts, event timeline, selected history/trail and object-index JSON export.
+- `OBJECT_MOVED` is image-coordinate change only; there is no camera-motion compensation. `OBJECT_EXPIRED` is not a physical-removal claim. Crossing/occlusion identities may be ambiguous; no ReID is implemented.
+- Telemetry uses the existing bounded hub; track/event/session IDs are never metric labels. Synthetic benchmark fixtures live in `src/benchmark/object-tracking-benchmark.ts`, not in real-model accuracy claims.
+
 ## Phase 4O · Runtime observability and cost
 
 `src/observability/` defines a page-scoped, transport-neutral telemetry protocol: bounded events, counter/gauge/histogram records, bounded series, explicit source provenance (`mock`, `fixture`, `real`, `unavailable`), and separate high-cardinality identity fields. It is not a global event bus and is not shared between pages.

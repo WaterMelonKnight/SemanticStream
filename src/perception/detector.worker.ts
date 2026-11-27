@@ -99,7 +99,7 @@ function detect(
       const category = detection.categories[0];
       if (!box || !category) continue;
       detections.push({
-        categoryId: category.index,
+        categoryId: Number.isSafeInteger(category.index) ? category.index : -1,
         categoryName: category.categoryName || category.displayName || 'object',
         score: category.score,
         box: { x: box.originX, y: box.originY, width: box.width, height: box.height },

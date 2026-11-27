@@ -13,7 +13,7 @@
     "test": "vitest run",
     "build": "vite build",
     "preview": "vite preview",
-    "benchmark": "tsx src/benchmark/cli.ts && tsx src/benchmark/retrieval-cli.ts && tsx src/benchmark/task-cli.ts && npm run benchmark:runtime",
+    "benchmark": "tsx src/benchmark/cli.ts && tsx src/benchmark/retrieval-cli.ts && tsx src/benchmark/task-cli.ts && npm run benchmark:runtime && npm run benchmark:tracking",
     "benchmark:phase2": "tsx src/benchmark/retrieval-cli.ts",
     "benchmark:phase3": "tsx src/benchmark/task-cli.ts",
     "benchmark:runtime": "tsx src/benchmark/runtime-cli.ts",
@@ -22,7 +22,8 @@
     "gateway:reconcile": "tsx src/gateway/reconcile.ts",
     "gateway:fixture": "tsx src/gateway/local-evaluation.ts",
     "predev": "node scripts/prepare-mediapipe-wasm.mjs",
-    "prebuild": "node scripts/prepare-mediapipe-wasm.mjs"
+    "prebuild": "node scripts/prepare-mediapipe-wasm.mjs",
+    "benchmark:tracking": "tsx src/benchmark/object-tracking-cli.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.7",

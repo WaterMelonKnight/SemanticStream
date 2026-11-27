@@ -1,4 +1,4 @@
-export type TelemetryModule = 'perception' | 'context' | 'decision' | 'scheduler' | 'model' | 'cost' | 'runtime';
+export type TelemetryModule = 'perception' | 'tracking' | 'events' | 'context' | 'decision' | 'scheduler' | 'model' | 'cost' | 'runtime';
 export type TelemetryKind = 'counter' | 'gauge' | 'histogram' | 'event';
 export type TelemetrySource = 'mock' | 'fixture' | 'real' | 'unavailable';
 
