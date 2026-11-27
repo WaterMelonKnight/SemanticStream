@@ -95,11 +95,14 @@ The browser keeps at most 60 rows for display. It does not retain source frames 
 | Source switch | Stop old source, invalidate the session, clear pending work and observations, start a new session. |
 | Video load | `VideoSource` resets; a new session ID is created. |
 | Video seek/restart | `VideoSource.onSessionReset` creates a new session; late results are ignored. |
-| Camera stop/ended | Dispose camera, invalidate session, clear overlay/table. |
-| Model unload | Dispose worker, reject/ignore outstanding work, keep the source preview running. |
-| Worker load failure | Show a retryable error; source and UI remain usable; no main-thread fallback (which would block the UI). |
-| Page exit | Dispose worker, source, timers, and long-task observer unless the page is entering bfcache. |
-| bfcache restore | The current worker/session is retained; controls refresh. |
+| Camera stop/ended | Dispose camera tracks, invalidate session, clear overlay/table. |
+| Document hidden | Dispose camera tracks, stop video/procedural input and new detection submission, keep model state if already loaded, and show an explicit manual-resume state. No camera is restarted automatically. |
+| Document visible | Refresh controls only; camera/video remain stopped until the user starts them again. |
+| Page exit | Dispose worker, camera/source, timers; invalidate the session. |
+| bfcache pagehide | Dispose camera/source and worker; keep the page's visibility counters; no detection survives. |
+| bfcache pageshow | Restart timers and refresh controls; no automatic camera or model restart. |
+| Late camera permission | `CameraSource` stops tracks returned after `dispose`; the caller checks a start generation token and ignores the old result. |
+| Late detection result | Rejected by request ID and session ID; pending work is cleared on background/page exit. |
 
 ## Metrics
 
@@ -111,8 +114,12 @@ Reported live and in the two-phase comparison:
 - Effective detection FPS: completed batches / elapsed session time.
 - Queue drops: pending replacement; not-ready skips during load.
 - Stale results: results rejected by session/request identity.
-- Long tasks: `PerformanceObserver('longtask')` count and max duration, where supported.
-- Source FPS is shown separately from detection FPS.
+- Long tasks: `PerformanceObserver('longtask')` count/max and page-elapsed per-minute rate, where supported.
+- Source/input FPS and detection FPS are shown separately, both cumulative and over the last five seconds.
+- Submitted vs completed detection requests.
+- Trigger reasons: fixed, change, periodic, interval-rejected and below-threshold counts.
+- Queue wait P50/P95 and inference P50/P95 separately; these are not conflated.
+- Foreground and background elapsed time. The page state distinguishes `background`, `no input`, `queue-limited` and `trigger-limited`; inference latency is reported separately.
 
 **No accuracy, precision, recall, or event-recall metrics are reported.** No labeled dataset is used. The procedural scene and local test video are not ground-truth benchmarks.
 
@@ -140,11 +147,11 @@ No tracking or event emission is implemented in Phase 4P.1.
 - The MediaPipe runtime uses Wasm and may need `wasm-unsafe-eval` in a strict CSP.
 - The model is fetched from the official Google Storage URL on enable. Media itself never leaves the browser.
 - Camera needs HTTPS or localhost and explicit permission.
-- No iPhone or Android real-device test was performed in this environment. Only headless Chromium on the development host was exercised. Camera permission and mobile thermal behavior remain untested.
+- Android real-device acceptance is recorded in GitHub Issue #12 (Redmi 22081212C, Android 14, Xiaomi Browser 135): camera grant/stop, local video, model load, real detection, fixed/adaptive/5-minute runs, Runtime Lab concurrency and telemetry export. Camera denial and background-release regression for the hardening build remain pending an unlocked device. iPhone Safari, memory, power and temperature remain unverified.
 - The 96 × 54 history buffer from earlier phases is not the detection input.
 
 ## Verification
 
-- Unit tests cover geometry, the trigger, the bounded queue, and metrics.
+- Unit tests cover geometry, the trigger, the bounded queue, metrics, visibility accounting, late camera-track disposal and detection-session guards.
 - Typecheck and the production build include the perception page and worker.
-- Browser verification covers model load, source input, detection batches, video seek/restart, live metrics, two-phase benchmark, model unload, and a 390 px viewport.
+- Browser verification covers model load, source input, detection batches, video seek/restart, live metrics, two-phase benchmark, model unload, 390 px, document-hidden camera release and manual resume.

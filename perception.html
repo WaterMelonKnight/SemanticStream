@@ -96,16 +96,24 @@
             <input id="change-threshold" type="range" min="0.5" max="15" step="0.5" value="3" />
             <output id="change-value" for="change-threshold">3.0%</output>
           </label>
-          <p class="note small">Frames are prepared at 320 × 320 with letterboxing, not from the 96 × 54 sampling thumbnail. Only one request is in flight; one latest pending request is kept and older pending frames are counted as dropped.</p>
+          <p class="note small">Frames are prepared at 320 × 320 with letterboxing, not from the 96 × 54 sampling thumbnail. Only one request is in flight; one latest pending request is kept and older pending frames are counted as dropped. Page state compares 5 s input vs detection and queue wait; inference P50/P95 are shown separately.</p>
           <div class="stats-grid">
             <div><span>Effective detection FPS</span><b id="stat-fps">0.00 fps</b></div>
+            <div><span>Last 5 s detection FPS</span><b id="stat-fps-5s">0.00 fps</b></div>
+            <div><span>Last 5 s input FPS</span><b id="stat-input-fps-5s">0.00 fps</b></div>
             <div><span>Batches</span><b id="stat-batches">0</b></div>
+            <div><span>Submitted / completed</span><b id="stat-submitted">0 / 0</b></div>
             <div><span>Observations</span><b id="stat-observations">0</b></div>
             <div><span>Inference P50</span><b id="stat-p50">—</b></div>
             <div><span>Inference P95</span><b id="stat-p95">—</b></div>
+            <div><span>Queue wait P50 / P95</span><b id="stat-queue-latency">— / —</b></div>
+            <div><span>Trigger reasons</span><b id="stat-triggers">—</b></div>
             <div><span>Queue / not ready</span><b id="stat-drops">0 / 0</b></div>
             <div><span>Stale results</span><b id="stat-stale">0</b></div>
+            <div><span>Foreground / background</span><b id="stat-visibility">—</b></div>
+            <div><span>Page state</span><b id="stat-state">foreground · idle</b></div>
             <div><span>Long tasks / max</span><b id="stat-longtasks">—</b></div>
+            <div><span>Long tasks / minute</span><b id="stat-longtask-rate">—</b></div>
             <div><span>Model load</span><b id="stat-load">—</b></div>
             <div><span>Active model</span><b id="stat-model">off</b></div>
           </div>
@@ -172,7 +180,7 @@
           <li>Completes detection at 2–5 FPS; adaptive mode combines a change probe with a periodic floor, so it does not rely only on frame diff.</li>
           <li>Stores no whole video and no detection thumbnails. Sessions reset on source switch, video load/seek/restart, camera stop, and page exit.</li>
           <li>Object tracking, OBJECT_APPEARED / MOVED / DISAPPEARED, and an Object State Index are future work; this page only emits stateless observations.</li>
-          <li>The reported metrics are load time, bytes, inference latency, batch/detection counts, effective FPS, dropped work, and page long tasks. No accuracy is reported without labels.</li>
+          <li>Reported metrics include load time/bytes, five-second input and detection FPS, submitted/completed requests, trigger reasons, queue and inference latency separately, foreground/background time, dropped work, and page long tasks/minute. No accuracy is reported without labels. Camera tracks are released on hidden/pagehide and are not restarted automatically.</li>
         </ul>
         <p class="note">Read the repository's <code>docs/visual-perception.md</code> and <code>docs/visual-perception-licenses.md</code> for architecture and license/deployment notes.</p>
       </section>

@@ -118,6 +118,16 @@ export type FromDetectorWorker =
   | { readonly type: 'error'; readonly phase: 'load' | 'detect' | 'unload'; readonly message: string }
   | DetectionResponse;
 
+export type TriggerReason = TriggerDecision['reason'];
+
+export interface TriggerReasonCounts {
+  fixed: number;
+  change: number;
+  periodic: number;
+  interval: number;
+  'below-threshold': number;
+}
+
 export interface LatencyStats {
   readonly count: number;
   readonly meanMs: number | null;
@@ -128,14 +138,23 @@ export interface LatencyStats {
 
 export interface PerceptionStats {
   readonly batches: number;
+  readonly submitted: number;
   readonly observations: number;
   readonly droppedQueue: number;
   readonly droppedStale: number;
   readonly skippedNotReady: number;
   readonly effectiveFps: number;
+  readonly recentDetectionFps: number;
+  readonly recentInputFps: number;
+  readonly triggerReasons: TriggerReasonCounts;
+  readonly foregroundMs: number;
+  readonly backgroundMs: number;
+  readonly visible: boolean;
   readonly latency: LatencyStats;
+  readonly queueLatency: LatencyStats;
   readonly longTasks: number;
   readonly maxLongTaskMs: number | null;
+  readonly longTasksPerMinute: number;
   readonly elapsedMs: number;
 }
 
