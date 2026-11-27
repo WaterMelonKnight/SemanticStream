@@ -77,31 +77,49 @@ function emptyStats(): TrackerStats {
   };
 }
 
+export function normalizedCategory(name: string): string {
+  return name.normalize('NFKC').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function categoryKey(observation: ObjectObservation): string {
+  return JSON.stringify([observation.detectorId, observation.modelVersion, normalizedCategory(observation.categoryName),
+    observation.categoryId < 0 ? null : observation.categoryId]);
+}
+
+function evidenceFor(observation: ObjectObservation) {
+  return Object.freeze({
+    frameRef: observation.evidence.frameRef, sessionId: observation.sessionId,
+    frameSequence: observation.frameSequence, capturedAtMs: observation.capturedAtMs,
+  });
+}
+
 function validateBatch(batch: DetectionBatch, config: TrackingConfig): string | null {
   if (!batch.sessionId) return 'sessionId must be non-empty.';
   if (!finite(batch.frameWidth) || batch.frameWidth <= 0 || !finite(batch.frameHeight) || batch.frameHeight <= 0) return 'Frame dimensions must be positive finite numbers.';
-  if (!finite(batch.frameSequence) || batch.frameSequence < 0) return 'frameSequence must be a non-negative finite number.';
+  if (!Number.isSafeInteger(batch.frameSequence) || batch.frameSequence < 0) return 'frameSequence must be a non-negative finite number.';
   if (!finite(batch.observedAtMs)) return 'observedAtMs must be finite.';
   const captured = batch.capturedAtMs ?? batch.observedAtMs;
   const completed = batch.completedAtMs ?? batch.observedAtMs;
   if (!finite(captured) || !finite(completed) || captured < 0) return 'Capture/completion times must be finite and non-negative.';
   if (completed < captured) return 'Detection completion cannot precede capture.';
   if (batch.status !== 'ok') return null;
+  if (batch.detections.length > config.maxTracks * 4) return 'Detection batch exceeds the bounded tracking capacity.';
   for (const observation of batch.detections) {
     if (observation.sessionId !== batch.sessionId) return 'Observation session does not match its batch.';
     if (!finite(observation.capturedAtMs) || !finite(observation.submittedAtMs) || !finite(observation.completedAtMs)) return 'Observation timestamps must be finite.';
     if (observation.capturedAtMs < 0 || observation.submittedAtMs < observation.capturedAtMs || observation.completedAtMs < observation.submittedAtMs) return 'Observation timestamps are out of order.';
-    if (observation.capturedAtMs > captured + 1) return 'Observation capture is newer than its batch capture.';
+    if (observation.frameSequence !== batch.frameSequence || observation.capturedAtMs !== captured
+      || observation.completedAtMs !== completed) return 'Observation frame times or sequence do not match the batch.';
     if (!finite(observation.score) || observation.score < 0 || observation.score > 1) return 'Observation confidence must be finite within [0,1].';
     // Category ids are opaque provider values; MediaPipe may use an unknown/negative index.
     if (!finite(observation.categoryId) || !Number.isSafeInteger(observation.categoryId)) return 'categoryId must be a safe integer.';
-    if (!observation.categoryName || typeof observation.categoryName !== 'string') return 'categoryName must be non-empty.';
+    if (typeof observation.categoryName !== 'string' || !normalizedCategory(observation.categoryName)
+      || !observation.detectorId || !observation.modelVersion) return 'Observation category and model namespace are required.';
     if (!finite(observation.box.x) || !finite(observation.box.y) || !finite(observation.box.width) || !finite(observation.box.height)) return 'Bounding box must be finite.';
     if (observation.box.width <= 0 || observation.box.height <= 0) return 'Bounding box dimensions must be positive.';
-    if (!finite(observation.frameSequence) || observation.frameSequence < 0) return 'Observation frameSequence must be non-negative.';
-    if (!observation.evidence || typeof observation.evidence.frameRef !== 'string' || !observation.evidence.frameRef) return 'Evidence frameRef must be non-empty.';
+    if (!observation.evidence?.frameRef || observation.evidence.capturedAtMs !== captured
+      || observation.evidence.frameSequence !== batch.frameSequence) return 'Evidence must match the observation capture.';
   }
-  if (batch.detections.length > config.maxTracks * 4) return 'Detection batch exceeds the bounded tracking capacity.';
   return null;
 }
 
@@ -183,7 +201,7 @@ export class ObjectTracker {
 
     this.stats.inputBatches += 1;
     const detections = batch.detections.map((observation) => ({
-      observation,
+      observation, categoryKey: categoryKey(observation),
       box: normalizeBox(observation, batch.frameWidth, batch.frameHeight),
     }));
     this.stats.detections += detections.length;
@@ -204,7 +222,7 @@ export class ObjectTracker {
       const predicted = predictedBox(track, elapsed, this.config.enableVelocity);
       for (let index = 0; index < accepted.length; index += 1) {
         const detection = accepted[index];
-        if (detection.observation.categoryId !== track.categoryId) continue;
+        if (detection.categoryKey !== track.categoryKey) continue;
         const overlap = iou(predicted, detection.box);
         const distance = centerDistance(predicted, detection.box);
         if (overlap < this.config.minIou && distance > this.config.maxCenterDistance) continue;
@@ -247,6 +265,7 @@ export class ObjectTracker {
         velocity: withVelocity(previous, detection.box, capturedAtMs),
         trackingState: state,
         evidenceRef: detection.observation.evidence.frameRef,
+        evidence: evidenceFor(detection.observation),
         associationUncertain: ambiguous,
       };
       this.tracks.set(updated.trackId, updated);
@@ -258,41 +277,6 @@ export class ObjectTracker {
         }
       } else if (previous.trackingState === 'TENTATIVE' && state === 'CONFIRMED') {
         transitions.push({ type: 'appeared', track: updated, previousState: previous.trackingState, atMs: completedAtMs, reason: 'confirmed_after_hits' });
-      }
-    }
-
-    for (let index = 0; index < accepted.length; index += 1) {
-      if (matchedDetections.has(index)) continue;
-      if (this.tracks.size >= this.config.maxTracks) {
-        this.stats.associationFailures += 1;
-        continue;
-      }
-      const detection = accepted[index];
-      const trackId = `${this.sessionId}:o${++this.nextTrackSerial}`;
-      const state: TrackedObject['trackingState'] = this.config.confirmHits <= 1 ? 'CONFIRMED' : 'TENTATIVE';
-      const track: TrackedObject = {
-        trackId,
-        sessionId: this.sessionId,
-        categoryId: detection.observation.categoryId,
-        categoryName: detection.observation.categoryName,
-        boundingBox: detection.box,
-        confidence: detection.observation.score,
-        firstSeenAtMs: capturedAtMs,
-        lastSeenAtMs: capturedAtMs,
-        lastObservationAtMs: completedAtMs,
-        stateChangedAtMs: completedAtMs,
-        confirmedAtMs: state === 'CONFIRMED' ? completedAtMs : null,
-        observationCount: 1,
-        missedObservations: 0,
-        trackingState: state,
-        evidenceRef: detection.observation.evidence.frameRef,
-        associationUncertain: false,
-      };
-      this.tracks.set(trackId, track);
-      matchedTracks.add(trackId);
-      this.stats.createdTracks += 1;
-      if (state === 'CONFIRMED') {
-        transitions.push({ type: 'appeared', track, previousState: 'TENTATIVE', atMs: completedAtMs, reason: 'confirmed_on_first_hit' });
       }
     }
 
@@ -322,6 +306,43 @@ export class ObjectTracker {
         transitions.push({ type: 'lost', track: lost, previousState: track.trackingState, atMs: completedAtMs, reason: 'valid_empty_gap' });
       } else {
         this.tracks.set(track.trackId, { ...track, missedObservations: track.missedObservations + 1 });
+      }
+    }
+
+    for (let index = 0; index < accepted.length; index += 1) {
+      if (matchedDetections.has(index)) continue;
+      if (this.tracks.size >= this.config.maxTracks) {
+        this.stats.associationFailures += 1;
+        continue;
+      }
+      const detection = accepted[index];
+      const trackId = `${this.sessionId}:o${++this.nextTrackSerial}`;
+      const state: TrackedObject['trackingState'] = this.config.confirmHits <= 1 ? 'CONFIRMED' : 'TENTATIVE';
+      const track: TrackedObject = {
+        trackId,
+        sessionId: this.sessionId,
+        categoryId: detection.observation.categoryId,
+        categoryName: detection.observation.categoryName,
+        categoryKey: detection.categoryKey,
+        boundingBox: detection.box,
+        confidence: detection.observation.score,
+        firstSeenAtMs: capturedAtMs,
+        lastSeenAtMs: capturedAtMs,
+        lastObservationAtMs: completedAtMs,
+        stateChangedAtMs: completedAtMs,
+        confirmedAtMs: state === 'CONFIRMED' ? completedAtMs : null,
+        observationCount: 1,
+        missedObservations: 0,
+        trackingState: state,
+        evidenceRef: detection.observation.evidence.frameRef,
+        evidence: evidenceFor(detection.observation),
+        associationUncertain: false,
+      };
+      this.tracks.set(trackId, track);
+      matchedTracks.add(trackId);
+      this.stats.createdTracks += 1;
+      if (state === 'CONFIRMED') {
+        transitions.push({ type: 'appeared', track, previousState: 'TENTATIVE', atMs: completedAtMs, reason: 'confirmed_on_first_hit' });
       }
     }
 

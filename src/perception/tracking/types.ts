@@ -36,11 +36,19 @@ export interface TrackVelocity {
   readonly yPerSecond: number;
 }
 
+export interface FrameEvidenceRef {
+  readonly frameRef: string;
+  readonly sessionId: string;
+  readonly frameSequence: number;
+  readonly capturedAtMs: number;
+}
+
 export interface TrackedObject {
   readonly trackId: string;
   readonly sessionId: string;
   readonly categoryId: number;
   readonly categoryName: string;
+  readonly categoryKey: string;
   /** Normalized source-frame coordinates, never model-input coordinates. */
   readonly boundingBox: NormalizedBox;
   readonly confidence: number;
@@ -58,6 +66,7 @@ export interface TrackedObject {
   readonly velocity?: TrackVelocity;
   readonly trackingState: TrackingState;
   readonly evidenceRef: string;
+  readonly evidence: FrameEvidenceRef;
   /** True when more than one same-category detection was a plausible match. */
   readonly associationUncertain: boolean;
 }
@@ -68,6 +77,7 @@ export interface TrackHistoryPoint {
   readonly confidence: number;
   readonly trackingState: TrackingState;
   readonly evidenceRef: string;
+  readonly evidence: FrameEvidenceRef;
 }
 
 export interface ObjectEvent {
@@ -77,7 +87,10 @@ export interface ObjectEvent {
   readonly trackId: string;
   readonly categoryId: number;
   readonly categoryName: string;
+  /** Completion of the batch which confirmed this event. */
   readonly observedAtMs: number;
+  readonly producedAtMs: number;
+  readonly stateChangedAtMs: number;
   readonly previousState: TrackingState;
   readonly currentState: TrackingState;
   readonly confidence: number;
@@ -86,6 +99,7 @@ export interface ObjectEvent {
   readonly certainty: EventCertainty;
   readonly reason: string;
   readonly evidenceRef: string;
+  readonly evidence: FrameEvidenceRef;
   readonly schemaVersion: number;
 }
 
@@ -180,7 +194,7 @@ export interface HistoryRange {
   readonly toMs: number;
 }
 
-export type EvidenceStatus = 'available' | 'unavailable' | 'expired' | 'wrong-session';
+export type EvidenceStatus = 'available' | 'unavailable' | 'expired' | 'evicted' | 'wrong-session' | 'budget-denied';
 
 export interface EvidenceResolution {
   readonly status: EvidenceStatus;
@@ -189,6 +203,7 @@ export interface EvidenceResolution {
   readonly requestedAtMs: number;
   readonly evidenceRef?: string;
   readonly capturedAtMs?: number;
+  readonly frameSequence?: number;
   readonly message: string;
 }
 
@@ -224,6 +239,7 @@ export interface TrackingSystemSnapshot extends ObjectStateSnapshot {
   readonly eventStateEntries: number;
   readonly activeEvictions: number;
   readonly listenerCount: number;
+  readonly listenerErrors: number;
 }
 
 export const TRACKING_DEFAULTS: TrackingConfig = {

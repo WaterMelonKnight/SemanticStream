@@ -34,8 +34,16 @@ function detection(
   };
 }
 
-function batch(sessionId: string, at: number, detections: readonly ObjectObservation[], status: DetectionBatch['status'] = 'ok'): DetectionBatch {
-  return { sessionId, observedAtMs: at, frameSequence: at, frameWidth: 100, frameHeight: 100, status, detections };
+function batch(
+  sessionId: string, at: number, detections: readonly ObjectObservation[], status: DetectionBatch['status'] = 'ok',
+  frameSequence = at, completedAtMs?: number,
+): DetectionBatch {
+  return { sessionId, observedAtMs: at, frameSequence, completedAtMs, frameWidth: 100, frameHeight: 100, status,
+    detections: detections.map((item) => ({
+      ...item, frameSequence, completedAtMs: completedAtMs ?? item.completedAtMs,
+      evidence: { ...item.evidence, frameSequence },
+    })),
+  };
 }
 
 const config = {
@@ -76,7 +84,7 @@ describe('object tracking system', () => {
     const skipped = system.process(batch('s', 5_000, [], 'skipped'));
     expect(skipped.frame.processed).toBe(false);
     expect(skipped.frame.tracks[0]?.trackingState).toBe('CONFIRMED');
-    const empty = system.process({ ...batch('s', 5_001, [], 'ok'), frameSequence: 5_001 });
+    const empty = system.process(batch('s', 5_001, []));
     expect(empty.frame.tracks).toHaveLength(0);
     expect(empty.frame.expired[0].trackingState).toBe('EXPIRED');
     expect(empty.events.map((event) => event.eventType)).toContain('OBJECT_EXPIRED');
@@ -150,13 +158,13 @@ describe('Phase 4P.2 review invariants', () => {
       tracker: { confirmHits: 1, lostAfterMs: 500, expireAfterMs: 1_000, maxAssociationGapMs: 1_000, minConfidence: 0.3 },
       events: { stationaryAfterMs: 10_000, cooldownMs: 0 },
     });
-    const first = detection('time', 10, 10, { at: 100 });
-    system.process({ ...batch('time', 100, [first]), capturedAtMs: 100, completedAtMs: 500, frameSequence: 1 });
-    const lost = system.process({ ...batch('time', 1_000, []), capturedAtMs: 1_000, completedAtMs: 1_200, frameSequence: 2 });
+    const first = { ...detection('time', 10, 10, { at: 100 }), completedAtMs: 500 };
+    system.process({ ...batch('time', 100, [first]), capturedAtMs: 100, completedAtMs: 500 });
+    const lost = system.process({ ...batch('time', 1_000, []), capturedAtMs: 1_000, completedAtMs: 1_200 });
     const lostEvent = lost.events.find((event) => event.eventType === 'OBJECT_TEMPORARILY_LOST');
     expect(lostEvent?.observedAtMs).toBe(1_200);
     expect(lostEvent?.previousState).toBe('CONFIRMED');
-    const expired = system.process({ ...batch('time', 2_000, []), capturedAtMs: 2_000, completedAtMs: 2_300, frameSequence: 3 });
+    const expired = system.process({ ...batch('time', 2_000, []), capturedAtMs: 2_000, completedAtMs: 2_300 });
     const expiredEvent = expired.events.find((event) => event.eventType === 'OBJECT_EXPIRED');
     expect(expiredEvent?.observedAtMs).toBe(2_300);
     expect(expiredEvent?.previousState).toBe('TEMPORARILY_LOST');
@@ -167,10 +175,10 @@ describe('Phase 4P.2 review invariants', () => {
       tracker: { confirmHits: 2, lostAfterMs: 100, expireAfterMs: 1_000, maxAssociationGapMs: 500, minConfidence: 0.3 },
       events: { stationaryAfterMs: 10_000, cooldownMs: 0 },
     });
-    system.process({ ...batch('tentative', 0, [detection('tentative', 10, 10, { at: 0 })]), frameSequence: 1 });
-    const lost = system.process({ ...batch('tentative', 200, []), frameSequence: 2 });
+    system.process(batch('tentative', 0, [detection('tentative', 10, 10, { at: 0 })]));
+    const lost = system.process(batch('tentative', 200, []));
     expect(lost.frame.tracks[0]?.trackingState).toBe('TEMPORARILY_LOST');
-    const again = system.process({ ...batch('tentative', 300, [detection('tentative', 11, 10, { at: 300 })]), frameSequence: 3 });
+    const again = system.process(batch('tentative', 300, [detection('tentative', 11, 10, { at: 300 })]));
     expect(again.events.map((event) => event.eventType)).toContain('OBJECT_APPEARED');
     expect(again.events.map((event) => event.eventType)).not.toContain('OBJECT_REAPPEARED');
   });
@@ -185,10 +193,10 @@ describe('Phase 4P.2 review invariants', () => {
     const wrong = system.process(batch('other', 200, [detection('other', 10, 10, { at: 200 })]));
     expect(wrong.frame.status).toBe('wrong-session');
     expect(system.snapshot().sessionId).toBe('s');
-    const invalid = system.process({ ...batch('s', 200, [detection('s', 10, 10, { at: 200, score: Number.NaN })]), frameSequence: 3 });
+    const invalid = system.process(batch('s', 200, [detection('s', 10, 10, { at: 200, score: Number.NaN })], 'ok', 3));
     expect(invalid.frame.status).toBe('invalid-observation');
     expect(invalid.frame.tracks[0]?.observationCount).toBe(2);
-    const invalidTime = system.process({ ...batch('s', 300, []), capturedAtMs: 300, completedAtMs: 50, frameSequence: 4 });
+    const invalidTime = system.process(batch('s', 300, [], 'ok', 4, 50));
     expect(invalidTime.frame.status).toBe('invalid-observation');
     expect(invalidTime.frame.tracks[0]?.trackingState).toBe('CONFIRMED');
   });
@@ -203,12 +211,12 @@ describe('Phase 4P.2 review invariants', () => {
       tracker: { ...config.tracker, confirmHits: 1, lostAfterMs: 100, expireAfterMs: 300, maxAssociationGapMs: 300 },
       index: { evidenceResolver: resolver },
     });
-    system.process({ ...batch('s', 0, [detection('s', 10, 10, { at: 0 })]), frameSequence: 1 });
+    system.process(batch('s', 0, [detection('s', 10, 10, { at: 0 })]));
     const trackId = system.getTrackedObjects()[0].trackId;
     expect(system.getObjectEvidence(trackId, -1).status).toBe('unavailable');
     expect(system.getObjectEvidence(trackId, 0, 'wrong').status).toBe('wrong-session');
-    system.process({ ...batch('s', 500, []), frameSequence: 2 });
-    expect(system.getObjectEvidence(trackId, 0).status).toBe('expired');
+    system.process(batch('s', 500, [], 'ok', 2));
+    expect(system.getObjectEvidence(trackId, 0).status).toBe('available');
   });
 
   it('keeps all internal tracking state bounded across 10000 unique-track cycles', () => {
@@ -219,8 +227,8 @@ describe('Phase 4P.2 review invariants', () => {
     });
     for (let index = 0; index < 10_000; index += 1) {
       const at = index * 300;
-      system.process({ ...batch('churn', at, [detection('churn', 10, 10, { categoryId: index, at })]), frameSequence: index * 2 });
-      system.process({ ...batch('churn', at + 250, []), frameSequence: index * 2 + 1 });
+      system.process(batch('churn', at, [detection('churn', 10, 10, { categoryId: index, at })]));
+      system.process(batch('churn', at + 250, []));
     }
     const diagnostics = system.diagnostics();
     expect(diagnostics.trackerTracks).toBeLessThanOrEqual(8);
@@ -235,7 +243,7 @@ describe('Phase 4P.2 review invariants', () => {
     const system = new ObjectTrackingSystem('defaults');
     for (let index = 0; index < 8; index += 1) {
       const at = index * 500;
-      system.process({ ...batch('defaults', at, [detection('defaults', 10 + index, 10, { at })]), frameSequence: index });
+      system.process(batch('defaults', at, [detection('defaults', 10 + index, 10, { at })], 'ok', index));
     }
     const diag = system.diagnostics();
     expect(diag.inputBatches).toBe(8);
@@ -246,8 +254,8 @@ describe('Phase 4P.2 review invariants', () => {
 
   it('rejects a completed batch whose completion time goes backwards', () => {
     const system = new ObjectTrackingSystem('ordered', { tracker: { confirmHits: 1, maxAssociationGapMs: 5_000, expireAfterMs: 5_000, lostAfterMs: 1_000 } });
-    system.process({ ...batch('ordered', 100, [detection('ordered', 10, 10, { at: 100 })]), capturedAtMs: 100, completedAtMs: 1_000, frameSequence: 1 });
-    const late = system.process({ ...batch('ordered', 200, []), capturedAtMs: 200, completedAtMs: 300, frameSequence: 2 });
+    system.process(batch('ordered', 100, [detection('ordered', 10, 10, { at: 100 })], 'ok', 1, 1_000));
+    const late = system.process(batch('ordered', 200, [], 'ok', 2, 300));
     expect(late.frame.status).toBe('invalid-time');
     expect(late.frame.tracks[0]?.trackingState).toBe('CONFIRMED');
   });
@@ -269,12 +277,12 @@ describe('bounded ownership and subscriptions', () => {
       index: { maxTracks: 2, maxHistoryPerTrack: 3, maxEvents: 10, historyWindowMs: 1_000 },
     });
     // One confirmed track, then expire it.
-    system.process({ ...batch('evict', 0, [detection('evict', 10, 10, { categoryId: 1, at: 0 })]), frameSequence: 1 });
-    system.process({ ...batch('evict', 500, []), frameSequence: 2 });
+    system.process(batch('evict', 0, [detection('evict', 10, 10, { categoryId: 1, at: 0 })], 'ok', 1));
+    system.process(batch('evict', 500, [], 'ok', 2));
     expect(system.snapshot().expiredCount).toBe(1);
     // Two new active tracks force the expired one out before active entries.
-    system.process({ ...batch('evict', 600, [detection('evict', 30, 10, { categoryId: 2, at: 600 })]), frameSequence: 3 });
-    system.process({ ...batch('evict', 700, [detection('evict', 50, 10, { categoryId: 3, at: 700 })]), frameSequence: 4 });
+    system.process(batch('evict', 600, [detection('evict', 30, 10, { categoryId: 2, at: 600 })], 'ok', 3));
+    system.process(batch('evict', 700, [detection('evict', 50, 10, { categoryId: 3, at: 700 })], 'ok', 4));
     const state = system.snapshot();
     expect(state.indexEntries).toBeLessThanOrEqual(2);
     expect(state.expiredCount).toBe(0);
@@ -288,8 +296,8 @@ describe('bounded ownership and subscriptions', () => {
       tracker: { confirmHits: 1, maxTracks: 3, lostAfterMs: 100, expireAfterMs: 200, maxAssociationGapMs: 200 },
       index: { maxTracks: 1, maxHistoryPerTrack: 2, maxEvents: 5, historyWindowMs: 1_000 },
     });
-    system.process({ ...batch('active-evict', 0, [detection('active-evict', 10, 10, { categoryId: 1, at: 0 })]), frameSequence: 1 });
-    system.process({ ...batch('active-evict', 100, [detection('active-evict', 40, 10, { categoryId: 2, at: 100 })]), frameSequence: 2 });
+    system.process(batch('active-evict', 0, [detection('active-evict', 10, 10, { categoryId: 1, at: 0 })], 'ok', 1));
+    system.process(batch('active-evict', 100, [detection('active-evict', 40, 10, { categoryId: 2, at: 100 })], 'ok', 2));
     const state = system.snapshot();
     expect(state.indexEntries).toBeLessThanOrEqual(1);
     expect(system.diagnostics().historyEntries).toBeLessThanOrEqual(1);
@@ -298,7 +306,7 @@ describe('bounded ownership and subscriptions', () => {
 
   it('rejects invalid observation session/box/confidence without changing state', () => {
     const system = new ObjectTrackingSystem('invalid', { tracker: { confirmHits: 1 } });
-    system.process({ ...batch('invalid', 0, [detection('invalid', 10, 10, { at: 0 })]), frameSequence: 1 });
+    system.process(batch('invalid', 0, [detection('invalid', 10, 10, { at: 0 })], 'ok', 1));
     const base = detection('invalid', 10, 10, { at: 100 });
     for (const candidate of [
       { ...base, sessionId: 'other' },
@@ -307,7 +315,7 @@ describe('bounded ownership and subscriptions', () => {
       { ...base, box: { x: Number.NaN, y: 10, width: 10, height: 10 } },
       { ...base, box: { x: 10, y: 10, width: 0, height: 10 } },
     ]) {
-      const result = system.process({ ...batch('invalid', 100, [candidate]), frameSequence: 2 });
+      const result = system.process(batch('invalid', 100, [candidate], 'ok', 2));
       expect(result.frame.status).toBe('invalid-observation');
       expect(system.getTrackedObjects()).toHaveLength(1);
     }
@@ -326,8 +334,8 @@ describe('expiry from a confirmed state', () => {
       tracker: { confirmHits: 1, lostAfterMs: 500, expireAfterMs: 1_000, maxAssociationGapMs: 1_000, minConfidence: 0.3 },
       events: { stationaryAfterMs: 10_000, cooldownMs: 0 },
     });
-    system.process({ ...batch('direct-expiry', 0, [detection('direct-expiry', 10, 10, { at: 0 })]), capturedAtMs: 0, completedAtMs: 100, frameSequence: 1 });
-    const result = system.process({ ...batch('direct-expiry', 2_000, []), capturedAtMs: 2_000, completedAtMs: 2_100, frameSequence: 2 });
+    system.process(batch('direct-expiry', 0, [detection('direct-expiry', 10, 10, { at: 0 })], 'ok', 1, 100));
+    const result = system.process(batch('direct-expiry', 2_000, [], 'ok', 2, 2_100));
     const expired = result.events.find((event) => event.eventType === 'OBJECT_EXPIRED');
     expect(expired?.previousState).toBe('CONFIRMED');
     expect(expired?.observedAtMs).toBe(2_100);
@@ -337,7 +345,63 @@ describe('expiry from a confirmed state', () => {
 describe('provider category ids', () => {
   it('accepts opaque safe-integer category ids including unknown -1', () => {
     const system = new ObjectTrackingSystem('opaque', { tracker: { confirmHits: 1 } });
-    system.process({ ...batch('opaque', 0, [detection('opaque', 10, 10, { categoryId: -1, at: 0 })]), frameSequence: 1 });
+    system.process(batch('opaque', 0, [detection('opaque', 10, 10, { categoryId: -1, at: 0 })], 'ok', 1));
     expect(system.getTrackedObjects()[0]?.categoryId).toBe(-1);
+  });
+});
+
+describe('integrated identity and causal evidence', () => {
+  it('uses normalized names and model namespaces when category IDs are unknown', () => {
+    const system = new ObjectTrackingSystem('s', { tracker: { confirmHits: 1 } });
+    const input = (at: number, categoryName: string, modelVersion = '1') => batch('s', at, [{
+      ...detection('s', 10, 10, { at, categoryId: -1 }), categoryName, modelVersion,
+    }]);
+    system.process(input(100, ' Dog '));
+    system.process(input(300, 'ＤＯＧ'));
+    system.process(input(600, 'person'));
+    system.process(input(900, 'dog', '2'));
+    expect(system.getTrackedObjects().map((track) => track.observationCount)).toEqual([2, 1, 1]);
+  });
+
+  it('rejects mismatched frame identity or capture time even if the boxes are usable', () => {
+    const system = new ObjectTrackingSystem('s');
+    const good = batch('s', 200, [detection('s', 10, 10, { at: 200 })]);
+    const observation = good.detections[0];
+    for (const mismatch of [
+      { ...observation, frameSequence: 199 },
+      { ...observation, capturedAtMs: 199 },
+      { ...observation, evidence: { ...observation.evidence, capturedAtMs: 201 } },
+      { ...observation, sessionId: 'other' },
+    ]) expect(system.process({ ...good, detections: [mismatch] }).frame.status).toBe('invalid-observation');
+    expect(system.process(good).frame.status).toBe('ok');
+  });
+
+  it('does not extend stationary evidence over a missed observation and isolates listeners', () => {
+    const system = new ObjectTrackingSystem('s', {
+      tracker: { confirmHits: 1, lostAfterMs: 1_500 },
+      events: { stationaryAfterMs: 400 },
+    });
+    let received = 0;
+    system.subscribe(() => { throw new Error('listener unavailable'); });
+    system.subscribe(() => { received += 1; });
+    system.process(batch('s', 0, [detection('s', 10, 10, { at: 0 })]));
+    expect(system.process(batch('s', 500, [])).events).toHaveLength(0);
+    const resume = system.process(batch('s', 600, [detection('s', 10, 10, { at: 600 })]));
+    expect(resume.events).toHaveLength(0);
+    expect(received).toBe(1);
+    expect(system.diagnostics().listenerErrors).toBe(1);
+  });
+
+  it('keeps capture, confirmation, production and historical lookup times distinct', () => {
+    const system = new ObjectTrackingSystem('s', { tracker: { confirmHits: 1 }, clock: () => 450 });
+    const established = system.process(batch('s', 100, [detection('s', 10, 10, { at: 100 })], 'ok', 1, 300));
+    const event = established.events[0];
+    expect(event).toMatchObject({ observedAtMs: 300, stateChangedAtMs: 300, producedAtMs: 450,
+      evidence: { capturedAtMs: 100, frameSequence: 1 } });
+    expect(system.getObjectEvidence(event.trackId, 250)).toMatchObject({ status: 'unavailable' });
+    expect(system.getObjectEvidence(event.trackId, 400)).toMatchObject({
+      status: 'unavailable', capturedAtMs: 100, requestedAtMs: 400,
+    });
+    expect(system.getObjectHistory(event.trackId)[0]).toMatchObject({ atMs: 300, evidence: { capturedAtMs: 100 } });
   });
 });

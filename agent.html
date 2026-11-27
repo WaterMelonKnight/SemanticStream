@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" href="/favicon.png" type="image/png" />
+  <title>SemanticStream · Integrated Agent Lab</title>
+  <script type="module" src="/src/agent-lab.ts"></script>
+</head>
+<body>
+<header class="bar"><a href="./index.html">SemanticStream</a><nav aria-label="Diagnostic labs">
+  <a href="./index.html">Sampling</a><a href="./perception.html">Perception</a><a href="./runtime.html">Runtime</a>
+</nav></header>
+<main>
+  <h1>Integrated Agent Lab</h1>
+  <p class="intro">Watch tracked objects and synthetic alerts. The agent sends selected text context to the active provider.</p>
+  <div class="grid">
+    <section class="panel">
+      <div class="heading"><h2>Live input</h2><span id="source-state" role="status"></span></div>
+      <div class="viewport">
+        <canvas id="feed" width="720" height="405" role="img" aria-label="Current live input frame"></canvas>
+        <canvas id="overlay" width="720" height="405" aria-hidden="true"></canvas>
+      </div>
+      <div class="actions">
+        <button id="monitor">System monitor</button><button id="procedural">Procedural scene</button>
+        <button id="camera">Start camera</button><button id="stop-source">Stop input</button>
+        <label class="file">Local video<input id="video-file" type="file" accept="video/*" /></label>
+        <button id="play" hidden>Play / pause video</button>
+        <button id="detect">Enable object detector</button>
+      </div>
+      <div class="actions" id="monitor-actions">
+        <button id="normal">Ordinary load change</button><button id="critical" class="warm">Critical replica alert</button>
+      </div>
+      <p id="detector-status" class="muted" role="status"></p>
+      <video id="media" hidden muted playsinline></video>
+    </section>
+    <section class="panel">
+      <div class="heading"><h2>User task</h2><span id="task-state"></span></div>
+      <form id="task">
+        <label>Template<select id="template">
+          <option value="monitor">System Monitor</option><option value="object">Object Watch</option>
+          <option value="region">Region Watch</option><option value="summary">Scene Summary</option>
+        </select></label>
+        <div class="fields" id="object-fields" hidden>
+          <label>Category <input id="category" placeholder="Any category" maxlength="64" /></label>
+          <label id="track-field">Track ID <input id="track" placeholder="Any track" maxlength="160" /></label>
+          <label id="move-field" class="inline"><input id="movement" type="checkbox" /> Watch image movement</label>
+        </div>
+        <fieldset id="region-fields" hidden>
+          <legend>ROI in image percent</legend>
+          <div class="fields">
+            <label>Left <input id="roi-x" type="number" min="0" max="99" value="20" /></label>
+            <label>Top <input id="roi-y" type="number" min="0" max="99" value="20" /></label>
+            <label>Width <input id="roi-w" type="number" min="1" max="100" value="60" /></label>
+            <label>Height <input id="roi-h" type="number" min="1" max="100" value="60" /></label>
+          </div>
+        </fieldset>
+        <div class="actions">
+          <button class="primary">Apply task</button><button id="pause" type="button">Pause task</button>
+          <button id="end-task" type="button">End task</button><button id="summary" type="button">Summarize scene</button>
+        </div>
+        <p id="task-error" role="status" class="muted"></p>
+      </form>
+      <h3>Objects</h3>
+      <ul id="tracks" class="log"></ul>
+      <p class="muted">Track IDs are session-local. Movement describes image coordinates. Expiry leaves physical presence unknown.</p>
+    </section>
+    <section class="panel">
+      <div class="heading"><h2>Agent responses</h2><span id="provider-state" role="status"></span></div>
+      <form id="ask" class="actions">
+        <input id="question" aria-label="Question" placeholder="Ask about the current scene…" required maxlength="210" />
+        <button class="primary">Ask</button><button type="button" id="interrupt">Interrupt</button>
+        <button type="button" id="retry" disabled>Ask again</button>
+      </form>
+      <ul id="answers" class="log output"></ul>
+      <h3>Inference queue</h3><ul id="queue" class="log"></ul>
+    </section>
+    <section class="panel">
+      <h2>Semantic events and policy</h2>
+      <ul id="events" class="log"></ul>
+      <h3>Local evidence</h3>
+      <div class="actions">
+        <button id="latest">Latest frame</button>
+        <form id="historical-time" class="actions">
+          <input id="at" aria-label="Historical monotonic timestamp in milliseconds" type="number" min="0" step="any" placeholder="Time (ms)" required />
+          <button>Frame at or before</button>
+        </form>
+      </div>
+      <p id="evidence-state" class="muted" role="status">Select a frame or event to inspect local evidence.</p>
+      <canvas id="evidence" width="96" height="54" role="img" aria-label="Selected evidence thumbnail"></canvas>
+      <pre id="history" class="muted"></pre>
+    </section>
+    <section class="panel">
+      <h2>Model provider</h2>
+      <form id="gateway-form">
+        <label>Mode<select id="model-mode"><option value="mock">Mock · local simulation</option><option value="gateway">Gateway · text model</option></select></label>
+        <label id="auth-wrap" hidden>Gateway access token<input type="password" id="access" autocomplete="off" minlength="32" maxlength="128" /></label>
+        <span id="gateway-address" class="muted"></span>
+        <div class="actions"><button id="connect">Apply provider</button><button type="button" id="disconnect" hidden>Disconnect Gateway</button></div>
+      </form>
+      <ul id="capabilities" class="log"></ul>
+      <h3>Cost and resources</h3><ul id="budget" class="log"></ul>
+    </section>
+    <section class="panel">
+      <h2>Lifecycle measurements</h2>
+      <p class="muted">Durations use the session clock. Gateway costs are configured-price estimates.</p>
+      <ul id="measurements" class="log"></ul>
+      <button id="telemetry">Export bounded telemetry</button>
+    </section>
+  </div>
+</main>
+</body>
+</html>

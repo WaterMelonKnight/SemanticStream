@@ -4,6 +4,9 @@ export type TelemetrySource = 'mock' | 'fixture' | 'real' | 'unavailable';
 
 export interface TelemetryIdentity {
   readonly sessionId?: string;
+  readonly runtimeInstanceId?: string;
+  readonly eventId?: string;
+  readonly frameSequence?: number;
   readonly taskId?: number;
   readonly requestId?: string;
   readonly providerRequestId?: string;

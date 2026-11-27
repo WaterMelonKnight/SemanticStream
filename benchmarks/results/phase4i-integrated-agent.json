@@ -1,0 +1,1124 @@
+{
+  "source": "fixture",
+  "costs": "unavailable · no paid provider",
+  "variants": [
+    {
+      "mode": "all-eligible-fifo",
+      "expected": 12,
+      "successes": 9,
+      "successRate": 0.75,
+      "falsePositives": 4,
+      "misses": 3,
+      "unanswered": 9,
+      "suppressed": 0,
+      "calls": 21,
+      "contextBytes": 9277,
+      "mockTokens": 228,
+      "staleBlocked": 26,
+      "violations": 0,
+      "p50Ms": 190,
+      "p95Ms": 1190,
+      "results": [
+        {
+          "scene": "static and unrelated detections",
+          "expected": 0,
+          "successes": 0,
+          "falsePositives": 2,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 0,
+          "starts": 2,
+          "bytes": 1083,
+          "mockTokens": 24,
+          "held": 0,
+          "staleBlocked": 2,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190,
+            190
+          ],
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · chair",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_STATIONARY · chair",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            }
+          ]
+        },
+        {
+          "scene": "appearance, loss and reappearance",
+          "expected": 3,
+          "successes": 3,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 0,
+          "starts": 3,
+          "bytes": 1669,
+          "mockTokens": 36,
+          "held": 0,
+          "staleBlocked": 3,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190,
+            25,
+            25
+          ],
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_TEMPORARILY_LOST · person",
+              "policy": "ESCALATE",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_REAPPEARED · person",
+              "policy": "ESCALATE",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            }
+          ]
+        },
+        {
+          "scene": "uncertain association and duplicate event",
+          "expected": 1,
+          "successes": 1,
+          "falsePositives": 1,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 0,
+          "starts": 2,
+          "bytes": 1064,
+          "mockTokens": 24,
+          "held": 0,
+          "staleBlocked": 2,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190,
+            190
+          ],
+          "observations": {
+            "uncertain": true,
+            "policy": "RESPOND",
+            "copies": 1
+          },
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_MOVED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            }
+          ]
+        },
+        {
+          "scene": "critical takeover and task revision",
+          "expected": 2,
+          "successes": 2,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 2,
+          "suppressed": 0,
+          "starts": 4,
+          "bytes": 882,
+          "mockTokens": 48,
+          "held": 0,
+          "staleBlocked": 8,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            25,
+            25
+          ],
+          "cases": [
+            {
+              "label": "Synthetic monitor: ordinary load change",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "invalidated"
+            },
+            {
+              "label": "Synthetic monitor alert: database replica offline",
+              "policy": "ESCALATE",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "Synthetic monitor: ordinary load change",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "cancelled"
+            },
+            {
+              "label": "Summarize current tracked objects and recent events.",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            }
+          ]
+        },
+        {
+          "scene": "background suspend, evicted evidence and late previous session",
+          "expected": 1,
+          "successes": 1,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 0,
+          "starts": 1,
+          "bytes": 527,
+          "mockTokens": 12,
+          "held": 0,
+          "staleBlocked": 2,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190
+          ],
+          "observations": {
+            "oldEvidence": "wrong-session",
+            "backgroundAt": 916,
+            "lateDecisions": 1
+          },
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "invalidated"
+            }
+          ]
+        },
+        {
+          "scene": "rolling evidence eviction and historical time",
+          "expected": 1,
+          "successes": 1,
+          "falsePositives": 1,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 0,
+          "starts": 2,
+          "bytes": 1068,
+          "mockTokens": 24,
+          "held": 0,
+          "staleBlocked": 2,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190,
+            190
+          ],
+          "observations": {
+            "asOfSequence": 1,
+            "asOfCapture": 0,
+            "eventEvidence": "evicted"
+          },
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_EXPIRED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            }
+          ]
+        },
+        {
+          "scene": "insufficient token reservation",
+          "expected": 1,
+          "successes": 0,
+          "falsePositives": 0,
+          "misses": 1,
+          "unanswered": 1,
+          "suppressed": 0,
+          "starts": 0,
+          "bytes": 0,
+          "mockTokens": 0,
+          "held": 0,
+          "staleBlocked": 0,
+          "violations": 0,
+          "effectiveDelaysMs": [],
+          "cases": [
+            {
+              "label": "Summarize current tracked objects and recent events.",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "rejected"
+            }
+          ]
+        },
+        {
+          "scene": "saturated queue and urgent user request",
+          "expected": 2,
+          "successes": 1,
+          "falsePositives": 0,
+          "misses": 1,
+          "unanswered": 3,
+          "suppressed": 0,
+          "starts": 5,
+          "bytes": 2635,
+          "mockTokens": 60,
+          "held": 0,
+          "staleBlocked": 7,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190,
+            190,
+            690,
+            690,
+            1190
+          ],
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "rejected"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "rejected"
+            },
+            {
+              "label": "Summarize current tracked objects and recent events.",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "rejected"
+            }
+          ]
+        },
+        {
+          "scene": "unconfirmed upstream fills physical slots",
+          "expected": 1,
+          "successes": 0,
+          "falsePositives": 0,
+          "misses": 1,
+          "unanswered": 3,
+          "suppressed": 0,
+          "starts": 2,
+          "bytes": 349,
+          "mockTokens": 0,
+          "held": 2,
+          "staleBlocked": 0,
+          "violations": 0,
+          "effectiveDelaysMs": [],
+          "cases": [
+            {
+              "label": "unconfirmed first",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "invalidated"
+            },
+            {
+              "label": "unconfirmed second",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "failed"
+            },
+            {
+              "label": "Can you continue?",
+              "policy": "RESPOND",
+              "reason": "Every eligible event is offered to the scheduler",
+              "outcome": "rejected"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "task-aware-fifo",
+      "expected": 12,
+      "successes": 9,
+      "successRate": 0.75,
+      "falsePositives": 0,
+      "misses": 3,
+      "unanswered": 4,
+      "suppressed": 9,
+      "calls": 16,
+      "contextBytes": 6895,
+      "mockTokens": 168,
+      "staleBlocked": 19,
+      "violations": 0,
+      "p50Ms": 190,
+      "p95Ms": 1190,
+      "results": [
+        {
+          "scene": "static and unrelated detections",
+          "expected": 0,
+          "successes": 0,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 2,
+          "starts": 0,
+          "bytes": 0,
+          "mockTokens": 0,
+          "held": 0,
+          "staleBlocked": 0,
+          "violations": 0,
+          "effectiveDelaysMs": [],
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · chair",
+              "policy": "IGNORE",
+              "reason": "Object is outside the watched target",
+              "outcome": "suppressed"
+            },
+            {
+              "label": "OBJECT_STATIONARY · chair",
+              "policy": "IGNORE",
+              "reason": "Object is outside the watched target",
+              "outcome": "suppressed"
+            }
+          ]
+        },
+        {
+          "scene": "appearance, loss and reappearance",
+          "expected": 3,
+          "successes": 3,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 0,
+          "starts": 3,
+          "bytes": 1669,
+          "mockTokens": 36,
+          "held": 0,
+          "staleBlocked": 3,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190,
+            25,
+            25
+          ],
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_TEMPORARILY_LOST · person",
+              "policy": "ESCALATE",
+              "reason": "Relevant state transition has priority",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_REAPPEARED · person",
+              "policy": "ESCALATE",
+              "reason": "Relevant state transition has priority",
+              "outcome": "completed"
+            }
+          ]
+        },
+        {
+          "scene": "uncertain association and duplicate event",
+          "expected": 1,
+          "successes": 1,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 1,
+          "starts": 1,
+          "bytes": 527,
+          "mockTokens": 12,
+          "held": 0,
+          "staleBlocked": 1,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190
+          ],
+          "observations": {
+            "uncertain": true,
+            "policy": "RETRIEVE",
+            "copies": 1
+          },
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_MOVED · person",
+              "policy": "RETRIEVE",
+              "reason": "Association or detector score warrants local evidence review",
+              "outcome": "suppressed"
+            }
+          ]
+        },
+        {
+          "scene": "critical takeover and task revision",
+          "expected": 2,
+          "successes": 2,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 1,
+          "suppressed": 1,
+          "starts": 3,
+          "bytes": 661,
+          "mockTokens": 36,
+          "held": 0,
+          "staleBlocked": 5,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            25,
+            25
+          ],
+          "cases": [
+            {
+              "label": "Synthetic monitor: ordinary load change",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "invalidated"
+            },
+            {
+              "label": "Synthetic monitor alert: database replica offline",
+              "policy": "ESCALATE",
+              "reason": "Relevant state transition has priority",
+              "outcome": "completed"
+            },
+            {
+              "label": "Synthetic monitor: ordinary load change",
+              "policy": "WAIT",
+              "reason": "Similar event is cooling down",
+              "outcome": "suppressed"
+            },
+            {
+              "label": "Summarize current tracked objects and recent events.",
+              "policy": "RESPOND",
+              "reason": "Explicit user request",
+              "outcome": "completed"
+            }
+          ]
+        },
+        {
+          "scene": "background suspend, evicted evidence and late previous session",
+          "expected": 1,
+          "successes": 1,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 0,
+          "starts": 1,
+          "bytes": 527,
+          "mockTokens": 12,
+          "held": 0,
+          "staleBlocked": 2,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190
+          ],
+          "observations": {
+            "oldEvidence": "wrong-session",
+            "backgroundAt": 916,
+            "lateDecisions": 1
+          },
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "invalidated"
+            }
+          ]
+        },
+        {
+          "scene": "rolling evidence eviction and historical time",
+          "expected": 1,
+          "successes": 1,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 1,
+          "starts": 1,
+          "bytes": 527,
+          "mockTokens": 12,
+          "held": 0,
+          "staleBlocked": 1,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190
+          ],
+          "observations": {
+            "asOfSequence": 1,
+            "asOfCapture": 0,
+            "eventEvidence": "evicted"
+          },
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_EXPIRED · person",
+              "policy": "WAIT",
+              "reason": "Track expired. Physical removal is unknown",
+              "outcome": "suppressed"
+            }
+          ]
+        },
+        {
+          "scene": "insufficient token reservation",
+          "expected": 1,
+          "successes": 0,
+          "falsePositives": 0,
+          "misses": 1,
+          "unanswered": 0,
+          "suppressed": 1,
+          "starts": 0,
+          "bytes": 0,
+          "mockTokens": 0,
+          "held": 0,
+          "staleBlocked": 0,
+          "violations": 0,
+          "effectiveDelaysMs": [],
+          "cases": [
+            {
+              "label": "Summarize current tracked objects and recent events.",
+              "policy": "WAIT",
+              "reason": "Request or token budget is unavailable",
+              "outcome": "suppressed"
+            }
+          ]
+        },
+        {
+          "scene": "saturated queue and urgent user request",
+          "expected": 2,
+          "successes": 1,
+          "falsePositives": 0,
+          "misses": 1,
+          "unanswered": 1,
+          "suppressed": 2,
+          "starts": 5,
+          "bytes": 2635,
+          "mockTokens": 60,
+          "held": 0,
+          "staleBlocked": 7,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190,
+            190,
+            690,
+            690,
+            1190
+          ],
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "WAIT",
+              "reason": "Queue is full; keeping existing work",
+              "outcome": "suppressed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "WAIT",
+              "reason": "Queue is full; keeping existing work",
+              "outcome": "suppressed"
+            },
+            {
+              "label": "Summarize current tracked objects and recent events.",
+              "policy": "RESPOND",
+              "reason": "Explicit user request",
+              "outcome": "rejected"
+            }
+          ]
+        },
+        {
+          "scene": "unconfirmed upstream fills physical slots",
+          "expected": 1,
+          "successes": 0,
+          "falsePositives": 0,
+          "misses": 1,
+          "unanswered": 2,
+          "suppressed": 1,
+          "starts": 2,
+          "bytes": 349,
+          "mockTokens": 0,
+          "held": 2,
+          "staleBlocked": 0,
+          "violations": 0,
+          "effectiveDelaysMs": [],
+          "cases": [
+            {
+              "label": "unconfirmed first",
+              "policy": "RESPOND",
+              "reason": "Explicit user request",
+              "outcome": "invalidated"
+            },
+            {
+              "label": "unconfirmed second",
+              "policy": "RESPOND",
+              "reason": "Explicit user request",
+              "outcome": "failed"
+            },
+            {
+              "label": "Can you continue?",
+              "policy": "WAIT",
+              "reason": "Request or token budget is unavailable",
+              "outcome": "suppressed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "mode": "semanticstream",
+      "expected": 12,
+      "successes": 10,
+      "successRate": 0.8333333333333334,
+      "falsePositives": 0,
+      "misses": 2,
+      "unanswered": 4,
+      "suppressed": 9,
+      "calls": 16,
+      "contextBytes": 7086,
+      "mockTokens": 168,
+      "staleBlocked": 18,
+      "violations": 0,
+      "p50Ms": 190,
+      "p95Ms": 1025,
+      "results": [
+        {
+          "scene": "static and unrelated detections",
+          "expected": 0,
+          "successes": 0,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 2,
+          "starts": 0,
+          "bytes": 0,
+          "mockTokens": 0,
+          "held": 0,
+          "staleBlocked": 0,
+          "violations": 0,
+          "effectiveDelaysMs": [],
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · chair",
+              "policy": "IGNORE",
+              "reason": "Object is outside the watched target",
+              "outcome": "suppressed"
+            },
+            {
+              "label": "OBJECT_STATIONARY · chair",
+              "policy": "IGNORE",
+              "reason": "Object is outside the watched target",
+              "outcome": "suppressed"
+            }
+          ]
+        },
+        {
+          "scene": "appearance, loss and reappearance",
+          "expected": 3,
+          "successes": 3,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 0,
+          "starts": 3,
+          "bytes": 1669,
+          "mockTokens": 36,
+          "held": 0,
+          "staleBlocked": 3,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190,
+            25,
+            25
+          ],
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_TEMPORARILY_LOST · person",
+              "policy": "ESCALATE",
+              "reason": "Relevant state transition has priority",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_REAPPEARED · person",
+              "policy": "ESCALATE",
+              "reason": "Relevant state transition has priority",
+              "outcome": "completed"
+            }
+          ]
+        },
+        {
+          "scene": "uncertain association and duplicate event",
+          "expected": 1,
+          "successes": 1,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 1,
+          "starts": 1,
+          "bytes": 527,
+          "mockTokens": 12,
+          "held": 0,
+          "staleBlocked": 1,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190
+          ],
+          "observations": {
+            "uncertain": true,
+            "policy": "RETRIEVE",
+            "copies": 1
+          },
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_MOVED · person",
+              "policy": "RETRIEVE",
+              "reason": "Association or detector score warrants local evidence review",
+              "outcome": "suppressed"
+            }
+          ]
+        },
+        {
+          "scene": "critical takeover and task revision",
+          "expected": 2,
+          "successes": 2,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 1,
+          "suppressed": 1,
+          "starts": 3,
+          "bytes": 661,
+          "mockTokens": 36,
+          "held": 0,
+          "staleBlocked": 5,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            25,
+            25
+          ],
+          "cases": [
+            {
+              "label": "Synthetic monitor: ordinary load change",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "invalidated"
+            },
+            {
+              "label": "Synthetic monitor alert: database replica offline",
+              "policy": "ESCALATE",
+              "reason": "Relevant state transition has priority",
+              "outcome": "completed"
+            },
+            {
+              "label": "Synthetic monitor: ordinary load change",
+              "policy": "WAIT",
+              "reason": "Similar event is cooling down",
+              "outcome": "suppressed"
+            },
+            {
+              "label": "Summarize current tracked objects and recent events.",
+              "policy": "RESPOND",
+              "reason": "Explicit user request",
+              "outcome": "completed"
+            }
+          ]
+        },
+        {
+          "scene": "background suspend, evicted evidence and late previous session",
+          "expected": 1,
+          "successes": 1,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 0,
+          "starts": 1,
+          "bytes": 527,
+          "mockTokens": 12,
+          "held": 0,
+          "staleBlocked": 2,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190
+          ],
+          "observations": {
+            "oldEvidence": "wrong-session",
+            "backgroundAt": 916,
+            "lateDecisions": 1
+          },
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "invalidated"
+            }
+          ]
+        },
+        {
+          "scene": "rolling evidence eviction and historical time",
+          "expected": 1,
+          "successes": 1,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 0,
+          "suppressed": 1,
+          "starts": 1,
+          "bytes": 527,
+          "mockTokens": 12,
+          "held": 0,
+          "staleBlocked": 1,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190
+          ],
+          "observations": {
+            "asOfSequence": 1,
+            "asOfCapture": 0,
+            "eventEvidence": "evicted"
+          },
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_EXPIRED · person",
+              "policy": "WAIT",
+              "reason": "Track expired. Physical removal is unknown",
+              "outcome": "suppressed"
+            }
+          ]
+        },
+        {
+          "scene": "insufficient token reservation",
+          "expected": 1,
+          "successes": 0,
+          "falsePositives": 0,
+          "misses": 1,
+          "unanswered": 0,
+          "suppressed": 1,
+          "starts": 0,
+          "bytes": 0,
+          "mockTokens": 0,
+          "held": 0,
+          "staleBlocked": 0,
+          "violations": 0,
+          "effectiveDelaysMs": [],
+          "cases": [
+            {
+              "label": "Summarize current tracked objects and recent events.",
+              "policy": "WAIT",
+              "reason": "Request or token budget is unavailable",
+              "outcome": "suppressed"
+            }
+          ]
+        },
+        {
+          "scene": "saturated queue and urgent user request",
+          "expected": 2,
+          "successes": 2,
+          "falsePositives": 0,
+          "misses": 0,
+          "unanswered": 1,
+          "suppressed": 2,
+          "starts": 5,
+          "bytes": 2826,
+          "mockTokens": 60,
+          "held": 0,
+          "staleBlocked": 6,
+          "violations": 0,
+          "effectiveDelaysMs": [
+            190,
+            190,
+            690,
+            1025,
+            501
+          ],
+          "cases": [
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "completed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "RESPOND",
+              "reason": "Relevant fresh change",
+              "outcome": "invalidated"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "WAIT",
+              "reason": "Queue is full; keeping existing work",
+              "outcome": "suppressed"
+            },
+            {
+              "label": "OBJECT_APPEARED · person",
+              "policy": "WAIT",
+              "reason": "Queue is full; keeping existing work",
+              "outcome": "suppressed"
+            },
+            {
+              "label": "Summarize current tracked objects and recent events.",
+              "policy": "RESPOND",
+              "reason": "Explicit user request",
+              "outcome": "completed"
+            }
+          ]
+        },
+        {
+          "scene": "unconfirmed upstream fills physical slots",
+          "expected": 1,
+          "successes": 0,
+          "falsePositives": 0,
+          "misses": 1,
+          "unanswered": 2,
+          "suppressed": 1,
+          "starts": 2,
+          "bytes": 349,
+          "mockTokens": 0,
+          "held": 2,
+          "staleBlocked": 0,
+          "violations": 0,
+          "effectiveDelaysMs": [],
+          "cases": [
+            {
+              "label": "unconfirmed first",
+              "policy": "RESPOND",
+              "reason": "Explicit user request",
+              "outcome": "invalidated"
+            },
+            {
+              "label": "unconfirmed second",
+              "policy": "RESPOND",
+              "reason": "Explicit user request",
+              "outcome": "failed"
+            },
+            {
+              "label": "Can you continue?",
+              "policy": "WAIT",
+              "reason": "Request or token budget is unavailable",
+              "outcome": "suppressed"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

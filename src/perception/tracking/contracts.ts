@@ -1,6 +1,7 @@
 import type {
   EventFilter,
   EvidenceResolution,
+  FrameEvidenceRef,
   HistoryRange,
   ObjectEvent,
   ObjectRegion,
@@ -26,8 +27,7 @@ export interface SemanticEventSource {
   subscribe(listener: (event: ObjectEvent) => void): () => void;
 }
 
-export interface EvidenceLookup {
-  readonly sessionId: string;
+export interface EvidenceLookup extends FrameEvidenceRef {
   readonly trackId: string;
   readonly evidenceRef: string;
   readonly atMs: number;

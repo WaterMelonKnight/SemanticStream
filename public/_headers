@@ -8,3 +8,9 @@
 # Cloudflare recognition so JavaScript is never mislabeled as application/wasm.
 /mediapipe/wasm/1.2.3/*
   Cache-Control: public, max-age=31536000, immutable
+
+/agent
+  Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'; media-src 'self' blob:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://storage.googleapis.com; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; frame-ancestors 'none'
+
+/agent.html
+  Content-Security-Policy: default-src 'self'; object-src 'none'; base-uri 'self'; media-src 'self' blob:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self' https://storage.googleapis.com; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; frame-ancestors 'none'

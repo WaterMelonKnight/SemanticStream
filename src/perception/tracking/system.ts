@@ -23,6 +23,7 @@ export interface ObjectTrackingSystemConfig {
   readonly events?: Partial<ObjectEventEngineConfig>;
   readonly index?: Partial<ObjectStateIndexConfig>;
   readonly evidenceResolver?: EvidenceResolver;
+  readonly clock?: () => number;
 }
 
 export interface TrackingProcessingResult {
@@ -52,10 +53,13 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
   private receivedDetections = 0;
   private lowConfidenceDetections = 0;
   private outputEvents = 0;
+  private listenerErrors = 0;
+  private readonly now: () => number;
   private lastStatus = 'idle';
   private readonly MAX_LISTENERS = 32;
 
   constructor(sessionId: string, config: ObjectTrackingSystemConfig = {}) {
+    this.now = config.clock ?? (() => performance.now());
     this.tracker = new ObjectTracker(config.tracker);
     this.engine = new ObjectEventEngine(config.events);
     this.index = new ObjectStateIndex(sessionId, {
@@ -83,15 +87,16 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
     this.lowConfidenceDetections = 0;
     this.outputEvents = 0;
     this.lastStatus = 'idle';
+    this.listenerErrors = 0;
   }
 
   process(batch: DetectionBatch): TrackingProcessingResult {
-    const trackingStart = performance.now();
+    const trackingStart = this.now();
     const frame = this.tracker.update(batch);
-    const trackingMs = performance.now() - trackingStart;
-    const eventStart = performance.now();
-    const eventResult = this.engine.process(frame);
-    const eventMs = performance.now() - eventStart;
+    const trackingMs = this.now() - trackingStart;
+    const eventStart = this.now();
+    const eventResult = this.engine.process(frame, this.now);
+    const eventMs = this.now() - eventStart;
     this.index.ingest(frame, eventResult.events, eventResult.suppressed);
     this.inputBatches += frame.processed ? 1 : 0;
     this.inputDetections += frame.detectionsProcessed;
@@ -106,10 +111,15 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
       if (this.eventSamples.length > 200) this.eventSamples.shift();
     }
     for (const event of eventResult.events) {
-      for (const listener of this.listeners) listener(event);
+      for (const listener of [...this.listeners]) {
+        if (event.sessionId !== this.sessionId) break;
+        try { listener(event); } catch { this.listenerErrors += 1; }
+      }
     }
     return { frame, events: eventResult.events, suppressedEvents: eventResult.suppressed, trackingMs, eventMs };
   }
+
+  setRegion(region?: ObjectRegion): void { this.engine.setRegion(region); }
 
   subscribe(listener: (event: ObjectEvent) => void): () => void {
     if (this.listeners.size >= this.MAX_LISTENERS) throw new RangeError('Too many semantic event listeners.');
@@ -150,6 +160,7 @@ export class ObjectTrackingSystem implements ObjectStateReader, SemanticEventSou
       eventStateEntries: this.engine.stateEntries,
       activeEvictions: this.index.activeEvictionCount,
       listenerCount: this.listeners.size,
+      listenerErrors: this.listenerErrors,
     };
   }
 }

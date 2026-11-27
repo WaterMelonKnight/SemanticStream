@@ -216,3 +216,7 @@ Preview `https://cdf5ad87.semanticstream.pages.dev` (review-fix build, commit `0
 - Tracking processing P50/P95 was ~0.1 ms; event processing ~0.0/0.1 ms.
 - Backgrounding released the camera and required manual restart. Page long tasks came from the existing inference/UI workload; no controlled tracking-on/off delta was measured.
 - Latest review fixes: `npm ci`, typecheck, 208 serialized tests, all benchmarks and build pass; CI push/PR success for `037656a`. No full long-run performance repeat.
+
+## Phase 4I integration
+
+The Agent attaches the real shared image cache through the existing evidence resolver contract. Category association is namespaced. Batches and observations use identical frame identity and timing. Historic lookup separates state-known time from the evidence capture time. [Integrated contracts](integrated-agent-runtime.md)

@@ -10,8 +10,8 @@ import { costView, formatUsd, formatUtilization } from './observability/cost';
 import type { CostView } from './observability/cost';
 import { summarizeRuntime } from './observability/summary';
 import { diagnosticCode } from './observability/diagnostics';
-import { isCurrentRuntimeSession, runtimeSessionId } from './observability/session';
 import { CostGeneration } from './observability/cost-generation';
+import { observeInference } from './observability/inference';
 import { TelemetryHub } from './observability/telemetry';
 import type { TelemetryEvent, TelemetrySource } from './observability/types';
 import { InferenceScheduler } from './inference/scheduler';
@@ -67,7 +67,6 @@ const costGeneration = new CostGeneration();
 let budgetPoller: BudgetPoller | undefined;
 let costTimer: number | undefined;
 let lastTelemetryAt = 0;
-const seenOutcomes = new Set<string>();
 let gateway: GatewayStreamingProvider | undefined;
 let lastMonitorEvent: string | undefined;
 let gatewayConnectGeneration = 0;
@@ -106,6 +105,7 @@ const mockRuntime = new InferenceScheduler(provider, systemClock, {
   slots: 2, queue: 4, tokensPerTask: 128, totalTokens: 12_800,
   transport: { windowMs: 5_000, maxFrames: 16, maxBytes: 1_300_000 },
 }, 'context-aware');
+observeInference(mockRuntime, telemetry, 'mock', 'runtime-lab-mock');
 let runtime = mockRuntime;
 
 function event(source: StreamEvent['source'], label: string, reason: string,
@@ -365,13 +365,6 @@ async function refreshCost(): Promise<void> {
   renderObservability();
 }
 
-function rememberOutcome(key: string): boolean {
-  if (seenOutcomes.has(key)) return false;
-  seenOutcomes.add(key);
-  if (seenOutcomes.size > 300) seenOutcomes.delete(seenOutcomes.values().next().value!);
-  return true;
-}
-
 function renderObservability(): void {
   const now = systemClock.now();
   const snapshot = runtime.snapshot();
@@ -398,28 +391,6 @@ function renderObservability(): void {
       telemetry.gauge(now, 'context', 'cache_frames', evidence.buffer.frameCount, 'frames', source, identity);
       telemetry.gauge(now, 'context', 'transfer_frames', evidence.retrieval.budget.total.usedFrames, 'frames', source, identity);
       telemetry.gauge(now, 'context', 'transfer_bytes', evidence.retrieval.budget.total.usedBytes, 'bytes', source, identity);
-    }
-    for (const record of snapshot.records) {
-      if (!record.task || !isCurrentRuntimeSession(record.task.session, snapshot.sessionVersion)) continue;
-      const taskSessionId = runtimeSessionId(record.task.session);
-      if (record.kind === 'end' && record.outcome) {
-        const key = record.task.session + ':' + record.task.id + ':' + record.outcome;
-        if (!rememberOutcome(key)) continue;
-        telemetry.event(record.atMs, 'scheduler', 'task_' + record.outcome, source, {
-          sessionId: taskSessionId,
-          taskId: record.task.id,
-          requestId: record.task.requestId,
-        }, { code: diagnosticCode(record.reason ?? record.outcome) }, true);
-      } else if (record.kind === 'upstream') {
-        const key = record.task.session + ':' + record.task.id + ':upstream';
-        if (!rememberOutcome(key)) continue;
-        telemetry.event(record.atMs, 'model', 'terminal', source, {
-          sessionId: taskSessionId,
-          taskId: record.task.id,
-          requestId: record.task.requestId,
-          providerRequestId: record.providerRequestId,
-        }, { code: record.usageUnknown ? 'usage_unknown' : 'terminal' }, true);
-      }
     }
   }
   const sourceLabel = gateway ? 'real gateway · configured estimate' : 'mock provider · local simulation';
@@ -683,6 +654,7 @@ element<HTMLFormElement>('gateway-controls').onsubmit = async (e) => {
       totalTokens: (caps.inputReserve + caps.outputLimit) * 100,
       transport: { windowMs: 5_000, maxFrames: 16, maxBytes: 384_000 },
     }, 'context-aware');
+    observeInference(runtime, telemetry, 'real', 'runtime-lab-gateway-' + generation);
     element('provider-status').textContent = 'Real gateway · ' + caps.model
       + ' · submitted text and triggered monitor events can incur charges';
     element('output-title').textContent = 'Streaming model output · ' + caps.model;
@@ -755,7 +727,6 @@ element('telemetry-json').onclick = () => downloadTelemetry('semanticstream-tele
 element('telemetry-csv').onclick = () => downloadTelemetry('semanticstream-telemetry.csv', telemetry.exportCsv(), 'text/csv');
 element('telemetry-clear').onclick = () => {
   telemetry.clear();
-  seenOutcomes.clear();
   lastTelemetryAt = 0;
   renderObservability();
 };

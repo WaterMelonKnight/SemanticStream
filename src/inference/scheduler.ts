@@ -5,7 +5,7 @@ import { OutputCoordinator } from './output';
 import { RuntimeMeasurements } from './runtime-metrics';
 import { validTokenCount } from './types';
 import type {
-  ChatMessage, ContextSnapshot, Evidence, InferenceProvider, InferenceRequest, InferenceTask, OutputChannel,
+  ChatMessage, ContextSnapshot, InferenceOrigin, Evidence, InferenceProvider, InferenceRequest, InferenceTask, OutputChannel,
   PartialOutput, ProviderTerminal, RuntimeClock, SchedulingPolicy, StreamEvent, TokenUsage,
 } from './types';
 
@@ -14,6 +14,7 @@ type Outcome = 'completed' | 'failed' | 'cancelled' | 'expired' | 'invalidated' 
 interface ActiveTask {
   readonly task: InferenceTask;
   readonly clearDeadline: () => void;
+  readonly isStillRelevant?: () => boolean;
   waitingFor?: number;
   slot?: number;
   startedAtMs?: number;
@@ -40,9 +41,11 @@ export interface TaskSummary {
   readonly eventId: number;
   readonly ingestedAtMs: number;
   readonly channel: OutputChannel;
+  readonly origin?: InferenceOrigin;
   readonly session: number;
   readonly interaction: number;
   readonly context: number;
+  readonly contextBytes: number;
   readonly evidence: readonly number[];
   readonly deadlineMs: number;
   readonly slot?: number;
@@ -65,6 +68,7 @@ export interface RuntimeRecord {
   readonly outcome?: Outcome;
   readonly upstreamMs?: number;
   readonly staleOutput?: boolean;
+  readonly firstValidOutput?: boolean;
   readonly usage?: TokenUsage;
   readonly usageUnknown?: boolean;
   readonly providerRequestId?: string;
@@ -91,8 +95,8 @@ function view({
 }: ActiveTask): TaskSummary {
   return {
     id: task.id, eventId: task.event.id, ingestedAtMs: task.event.ingestedAtMs, channel: task.channel,
-    session: task.sessionVersion, interaction: task.interactionVersion, context: task.contextVersion,
-    evidence: task.context.evidence.map(({ sequence }) => sequence),
+    session: task.sessionVersion, interaction: task.interactionVersion, context: task.contextVersion, contextBytes: task.context.encodedBytes,
+    origin: task.event.origin, evidence: task.context.evidence.map(({ sequence }) => sequence),
     deadlineMs: task.deadlineMs, slot, startedAtMs, firstOutputAtMs,
     firstTextAtMs, requestId, providerRequestId, stopRequestedAtMs, stoppedAtMs, quarantined,
   };
@@ -128,6 +132,7 @@ export class InferenceScheduler {
   private peakSlots = 0;
   private batchDepth = 0;
   private pumping = false;
+  private readonly listeners = new Set<(record: RuntimeRecord) => void>();
 
   constructor(
     private readonly provider: InferenceProvider,
@@ -161,6 +166,7 @@ export class InferenceScheduler {
     }
     const event: StreamEvent = Object.freeze({
       source: input.source, capturedAtMs: input.capturedAtMs,
+      origin: input.origin && Object.freeze({ ...input.origin }),
       label: input.label.slice(0, 500), reason: input.reason.slice(0, 200),
       id: ++this.eventId, sessionVersion: this.session, ingestedAtMs: now,
     });
@@ -180,7 +186,9 @@ export class InferenceScheduler {
     if (!request) return;
     const label = event.source === 'scenario' ? 'Synthetic monitor event: ' + event.label : event.label;
     const current: ChatMessage = Object.freeze({
-      role: 'user', content: request.textContext ? request.textContext.slice(0, 300) + '\n\n' + label : label,
+      role: 'user', content: request.structuredText
+        ? request.structuredText.slice(0, 790) + '\n\n' + label.slice(0, 210)
+        : request.textContext ? request.textContext.slice(0, 300) + '\n\n' + label : label,
     });
     const history = request.channel === 'response' && event.source === 'user' ? this.conversation : [];
     const messages = Object.freeze([...history, current]);
@@ -200,6 +208,13 @@ export class InferenceScheduler {
     });
 
     this.batch(() => {
+      if (request.supersedeLowerPriority) {
+        for (const other of this.active()) {
+          if (other.task.channel === channel && other.task.priority < priority) {
+            this.finish(other, 'invalidated', 'Superseded by a higher priority event');
+          }
+        }
+      }
       if (supersede) this.retire('Channel superseded', channel);
       const active = this.active();
       const reject = (reason: string) => this.record('end', reason, { task, clearDeadline() {} }, undefined, 'rejected');
@@ -232,7 +247,7 @@ export class InferenceScheduler {
         this.finish(lowest, 'invalidated', 'Displaced by higher priority');
       }
       const work: ActiveTask = {
-        task, waitingFor: dependsOn,
+        task, waitingFor: dependsOn, isStillRelevant: request.isStillRelevant,
         clearDeadline: this.clock.after(Math.max(0, task.deadlineMs - this.clock.now()), () => {
           this.batch(() => this.finish(work, 'expired', 'Deadline expired'));
         }),
@@ -290,6 +305,13 @@ export class InferenceScheduler {
         quarantinedSlots: this.quarantinedSlots(),
       },
     };
+  }
+
+  /** Observers consume diagnostics synchronously. Listener failures cannot alter admission. */
+  subscribe(listener: (record: RuntimeRecord) => void): () => void {
+    if (this.listeners.size >= 16) throw new RangeError('Too many inference record listeners');
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
   }
 
   requestMeasurements(session?: number) {
@@ -392,6 +414,10 @@ export class InferenceScheduler {
       this.finish(work, 'expired', 'Deadline expired before dispatch');
       return;
     }
+    if (work.isStillRelevant && !work.isStillRelevant()) {
+      this.finish(work, 'invalidated', 'Event is no longer relevant at dispatch');
+      return;
+    }
     const exposure = this.reservedTokens + this.settledTokens + this.provisionalTokens;
     if (this.reservationOverrun || task.tokenReservation > this.limits.totalTokens - exposure) {
       this.finish(work, 'rejected', this.reservationOverrun ? 'Provider exceeded the token reservation'
@@ -453,8 +479,9 @@ export class InferenceScheduler {
     const decision = this.output.partial(task, chunk, attempt.nextIndex, active, this.session, this.interaction, now);
     if (chunk.index === attempt.nextIndex) attempt.nextIndex += 1;
     if (decision === 'authorized') {
+      const firstValidOutput = work.firstOutputAtMs === undefined;
       work.firstOutputAtMs ??= now;
-      this.record('output', 'Authorized partial', work);
+      this.record('output', 'Authorized partial', work, undefined, undefined, { firstValidOutput });
     } else {
       const reason = decision === 'stale' ? 'Stale task, writer or deadline'
         : decision === 'full' ? 'Visible output cap reached' : 'Invalid or out-of-order partial';
@@ -498,10 +525,13 @@ export class InferenceScheduler {
 
   private record(
     kind: RuntimeRecord['kind'], reason: string, work?: ActiveTask, event?: StreamEvent, outcome?: Outcome,
-    details?: Pick<RuntimeRecord, 'upstreamMs' | 'usage' | 'usageUnknown' | 'providerRequestId' | 'staleOutput'>,
+    details?: Pick<RuntimeRecord, 'upstreamMs' | 'usage' | 'usageUnknown' | 'providerRequestId' | 'staleOutput' | 'firstValidOutput'>,
   ): void {
     const row = { ...details, atMs: this.clock.now(), kind, reason, task: work && view(work), event, outcome };
     this.journal.push(row);
     this.measurements.record(row);
+    for (const listener of this.listeners) {
+      try { listener(row); } catch { /* Diagnostics must not interrupt the lifecycle. */ }
+    }
   }
 }

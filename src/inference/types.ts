@@ -18,11 +18,12 @@ export type SchedulingPolicy = 'fifo' | 'context-aware';
 export interface StreamEvent {
   readonly id: number;
   readonly sessionVersion: number;
-  readonly source: 'scenario' | 'pixels' | 'user' | 'replay';
+  readonly source: 'scenario' | 'pixels' | 'user' | 'replay' | 'semantic';
   readonly capturedAtMs: number;
   readonly ingestedAtMs: number;
   readonly label: string;
   readonly reason: string;
+  readonly origin?: InferenceOrigin;
 }
 
 /** The adapter serializes its evidence into an immutable string before handing it over. */
@@ -55,6 +56,16 @@ export interface ContextSnapshot {
   readonly encodedBytes: number;
 }
 
+export interface InferenceOrigin {
+  readonly runtimeInstanceId: string;
+  readonly sessionId: string;
+  readonly eventId: string;
+  readonly sourceGeneration: number;
+  readonly taskRevision: number;
+  readonly interactionVersion: number;
+  readonly producedAtMs: number;
+}
+
 export interface InferenceRequest {
   readonly channel: OutputChannel;
   readonly priority: number;
@@ -62,12 +73,16 @@ export interface InferenceRequest {
   readonly dedupeKey?: string;
   /** Revoke tasks on this channel, independently of the scheduling policy. */
   readonly supersede?: boolean;
+  readonly supersedeLowerPriority?: boolean;
   /** An earlier queued or running task in the same interaction must succeed first. */
   readonly dependsOn?: number;
   readonly textContext?: string;
+  /** Serialized structured context selected by the caller. */
+  readonly structuredText?: string;
+  readonly isStillRelevant?: () => boolean;
 }
 
-export interface InferenceTask extends Readonly<Omit<InferenceRequest, 'ttlMs' | 'supersede' | 'textContext'>> {
+export interface InferenceTask extends Readonly<Omit<InferenceRequest, 'ttlMs' | 'supersede' | 'supersedeLowerPriority' | 'textContext' | 'structuredText' | 'isStillRelevant'>> {
   readonly id: number;
   readonly sessionVersion: number;
   readonly interactionVersion: number;

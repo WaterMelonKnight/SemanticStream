@@ -40,8 +40,8 @@ export function compatibleRequest(
     model,
     messages: [{
       role: 'system',
-      content: 'You are a concise system monitoring assistant. You receive text and synthetic event metadata. '
-        + 'You cannot view camera, video or pixels. State when evidence is unavailable. Do not claim to execute actions.',
+      content: 'You are a concise system monitoring assistant. You receive text, local detector/tracker metadata and synthetic events. '
+        + 'Camera, video and pixels are unavailable to you. Track expiry does not establish removal. State uncertainty and avoid claiming external actions.',
     }, ...messages],
     stream: true,
     stream_options: { include_usage: true },

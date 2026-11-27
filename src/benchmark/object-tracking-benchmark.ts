@@ -238,9 +238,7 @@ export const TRACKING_FIXTURES: readonly TrackingFixture[] = [
   },
 ];
 
-let serial = 0;
-function observation(session: string, frame: FixtureFrame, box: FixtureBox): ObjectObservation {
-  const id = ++serial;
+function observation(session: string, frame: FixtureFrame, box: FixtureBox, id: number): ObjectObservation {
   return {
     sessionId: session,
     frameSequence: id,
@@ -312,7 +310,8 @@ export function runTrackingBenchmark(
         currentSession = session;
         presentPrevious = new Set();
       }
-      const detections = frame.detections.map((box) => observation(session, frame, box));
+      frameSequence += 1;
+      const detections = frame.detections.map((box) => observation(session, frame, box, frameSequence));
       rawDetections += detections.length;
       associationTotal += detections.length;
       const result = system.process({
@@ -320,7 +319,7 @@ export function runTrackingBenchmark(
         observedAtMs: frame.atMs,
         capturedAtMs: frame.atMs,
         completedAtMs: frame.atMs,
-        frameSequence: ++frameSequence,
+        frameSequence,
         frameWidth: 100,
         frameHeight: 100,
         status: frame.status ?? 'ok',
