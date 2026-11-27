@@ -207,12 +207,12 @@ Association denominator includes every detection, including unmatched and low-co
 
 ## Real-device observation
 
-Preview `https://c8aa861a.semanticstream.pages.dev` (pre-review) on a Redmi 22081212C / Android 14 / Xiaomi Browser 135.0.7049.79:
+Preview `https://cdf5ad87.semanticstream.pages.dev` (review-fix build, commit `037656a`) on a Redmi 22081212C / Android 14 / Xiaomi Browser 135.0.7049.79. The earlier pre-review build was `c8aa861a`.
 
-- Stable tracks for a static scene retained 220+ observations with stable IDs.
-- Real image-space events: `OBJECT_APPEARED` 6, `OBJECT_MOVED` 15, `OBJECT_STATIONARY` 8, `OBJECT_TEMPORARILY_LOST` 4, `OBJECT_EXPIRED` 4.
-- The ad-hoc hand-occlusion attempt produced temporary loss/expiry but no confirmed `OBJECT_REAPPEARED`; real-device reappearance remains **NOT_TESTED**.
+- Pre-review build: stable tracks for a static scene retained 220+ observations with stable IDs; real image-space events included `OBJECT_APPEARED` 6, `OBJECT_MOVED` 15, `OBJECT_STATIONARY` 8, `OBJECT_TEMPORARILY_LOST` 4, `OBJECT_EXPIRED` 4.
+- Review-fix build: the page exercised 75 received/accepted detection batches, one active track (`perception-camera-2:o1`) and two events (`OBJECT_APPEARED`, `OBJECT_STATIONARY`); tracking status stayed `ok`. This was a brief regression, not a new long-run performance test.
+- The ad-hoc hand-occlusion attempt on the pre-review build produced temporary loss/expiry but no confirmed `OBJECT_REAPPEARED`; real-device reappearance remains **NOT_TESTED**. The review-fix category-id issue was found during this regression: MediaPipe can return an opaque non-default category index; the worker now normalizes it and the tracker accepts opaque safe-integer category ids.
 - Object-index JSON export produced a bounded 24.2 KB snapshot.
 - Tracking processing P50/P95 was ~0.1 ms; event processing ~0.0/0.1 ms.
 - Backgrounding released the camera and required manual restart. Page long tasks came from the existing inference/UI workload; no controlled tracking-on/off delta was measured.
-- The latest review fixes were build/type/test/benchmark verified and receive a short final Preview regression; no full long-run performance repeat.
+- Latest review fixes: `npm ci`, typecheck, 208 serialized tests, all benchmarks and build pass; CI push/PR success for `037656a`. No full long-run performance repeat.
